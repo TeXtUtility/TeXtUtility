@@ -37,18 +37,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// Custom SwiftUI menu-bar icon. The HStack is rendered into an NSImage for the
-/// status item and refreshes whenever PlanState publishes — so progress percentage
+/// status item and refreshes whenever PlanState publishes, so progress percentage
 /// updates live as the executor advances.
 struct MenuBarIconView: View {
     @EnvironmentObject var state: PlanState
-    @State private var checkmarkOpacity: Double = 1.0
-    @State private var lastFlashedCompletion: Bool = false
+    @State private var checkmarkVisible: Bool = true
+    @State private var flashStarted: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
             iconLayer
             if state.hasUnclaimedCompletion {
-                // Don't render extra text — the checkmark icon stands alone.
+                // Don't render extra text, the checkmark icon stands alone.
                 EmptyView()
             } else if state.pauseRemainingMs > 0 {
                 Text(pauseText)
@@ -59,28 +59,29 @@ struct MenuBarIconView: View {
             }
         }
         .onChange(of: state.hasUnclaimedCompletion) { newValue in
-            if newValue && !lastFlashedCompletion {
-                lastFlashedCompletion = true
+            if newValue && !flashStarted {
+                flashStarted = true
                 runCompletionFlash()
             } else if !newValue {
-                // Reset for the next session.
-                lastFlashedCompletion = false
-                checkmarkOpacity = 1.0
+                flashStarted = false
+                checkmarkVisible = true
             }
         }
     }
 
-    /// Three blinks then solid. Pattern: visible, hidden, visible, hidden,
-    /// visible, hidden, visible — three full off→on cycles ending solid.
+    /// Three blinks then solid. Each step is held long enough that the
+    /// menu-bar label's NSImage rasterization picks it up: SwiftUI
+    /// animations don't render through NSStatusItem-backed labels (the
+    /// label is regenerated on each @State change, not interpolated), so
+    /// we drive the flash as discrete state assignments without
+    /// `withAnimation`.
     private func runCompletionFlash() {
-        let pattern: [Double] = [1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]
-        let interval: Double = 0.16
-        checkmarkOpacity = 1.0
-        for (i, val) in pattern.enumerated() {
+        let pattern: [Bool] = [true, false, true, false, true, false, true]
+        let interval: Double = 0.22
+        checkmarkVisible = pattern[0]
+        for (i, visible) in pattern.enumerated().dropFirst() {
             DispatchQueue.main.asyncAfter(deadline: .now() + interval * Double(i)) {
-                withAnimation(.easeInOut(duration: interval * 0.7)) {
-                    checkmarkOpacity = val
-                }
+                self.checkmarkVisible = visible
             }
         }
     }
@@ -104,7 +105,7 @@ struct MenuBarIconView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .imageScale(.medium)
                     .foregroundStyle(.white)
-                    .opacity(checkmarkOpacity)
+                    .opacity(checkmarkVisible ? 1 : 0)
             } else if state.pauseRemainingMs > 0 {
                 Image(systemName: "pause.circle")
                     .imageScale(.medium)
