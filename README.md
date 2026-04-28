@@ -280,6 +280,7 @@ The Aalto 136M-keystroke corpus in particular is the largest publicly available 
   - Charts (post-session WPM graph, macOS 13+)
   - ImageIO and CoreImage (icon trimming, runtime image rendering)
   - Foundation, Dispatch
+  - Infinitum
 - **Swift Package Manager** for the build system.
 - **iconutil** and **codesign** (Apple developer tools) for app packaging.
 - **OpenSSL** / **LibreSSL** for the self-signed code-signing cert generation step.
