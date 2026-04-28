@@ -19,13 +19,13 @@
 
 ## What it does
 
-Paste text. Pick a typist profile. Hit start, focus the target window during a 3-second countdown, and the text is typed for you — keystroke by keystroke, with realistic timing, occasional typos that get corrected, and (in essay mode) the kind of mid-draft revisions and re-reading pauses that real people produce.
+Paste text. Pick a typist profile. Hit start, focus the target window during a 3-second countdown, and the text is typed for you, keystroke by keystroke, with realistic timing, occasional typos that get corrected, and (in essay mode) the kind of mid-draft revisions and re-reading pauses that real people produce.
 
 The output is **indistinguishable from human typing** down to the per-keystroke timing distribution and the operational-transformation log of collaborative editors. Models and parameters are calibrated against published typing-behavior research (Aalto 136M-keystroke corpus, Inputlog studies, motor-control experiments).
 
 ## Use cases
 
-- **Accessibility.** Composing a long document via switch input, eye gaze, or speech-to-text is slow. Drafting in a comfortable editor and then having TeXtUtility type the text into the destination at a natural cadence is more ergonomic than instant paste — especially for forms and editors that visibly chunk pasted blocks.
+- **Accessibility.** Composing a long document via switch input, eye gaze, or speech-to-text is slow. Drafting in a comfortable editor and then having TeXtUtility type the text into the destination at a natural cadence is more ergonomic than instant paste, especially for forms and editors that visibly chunk pasted blocks.
 - **Tutorial recording and demos.** Screencasts where text appears instantaneously feel mechanical. TeXtUtility produces typing that reads as authentic on playback without the recording artist hand-typing every example.
 - **Form filling for input-validating services.** Some web forms throttle, animate against, or reject instant-paste input; TeXtUtility's per-keystroke pacing satisfies those checks.
 - **Application QA.** Testing keyboard-handling code paths, debouncing logic, autosave timing, and IME interactions benefits from realistic input streams rather than uniform 10ms-spaced events.
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/TeXtUtility/TeXtUtility/main/instal
 
 1. Click the keyboard icon in your menu bar to open the popover.
 2. Paste your text into the editor, or drop in plain text from another app.
-3. Select a **profile** — the persona that controls speed, error rate, and feel:
+3. Select a **profile**, the persona that controls speed, error rate, and feel:
 
     | Profile | WPM | Texture |
     |---|---|---|
@@ -56,14 +56,14 @@ curl -fsSL https://raw.githubusercontent.com/TeXtUtility/TeXtUtility/main/instal
     | Fast | 85 | Skilled, quick, low-error |
     | Touch-Typist | 95 | Expert, near-flawless |
 
-4. Toggle **Essay mode** on for long-form composition (adds session breaks, mid-draft edits, and a pacing layer that targets ~19 WPM net composition speed — the realistic rate for actual writing including thinking time).
-5. Click **Start typing in 3s**. During the 3-second countdown, focus the target window — that captures the destination PID, and keystrokes will be delivered to it for the entire session even if you switch focus elsewhere.
+4. Toggle **Essay mode** on for long-form composition (adds session breaks, mid-draft edits, and a pacing layer that targets ~19 WPM net composition speed, the realistic rate for actual writing including thinking time).
+5. Click **Start typing in 3s**. During the 3-second countdown, focus the target window. That captures the destination PID, and keystrokes will be delivered to it for the entire session even if you switch focus elsewhere.
 6. Wait. The menu-bar icon shows live progress. When done, a white checkmark flashes three times and stays solid; click the icon to open the post-session stats panel (WPM line chart, total time, character/word counts, deletions, edit operations).
 
 ### Stopping
 
 - **In-app**: ⌘. (or the Stop button)
-- **Globally** (from any app, instant): **⌥⌘.** — a global event tap intercepts the chord even while typing is in flight.
+- **Globally** (from any app, instant): **⌥⌘.**. A global event tap intercepts the chord even while typing is in flight.
 
 ## How it works
 
@@ -112,24 +112,24 @@ Each layer adds one slice of human typing texture; the final stream is a list of
 
 ## Fidelity
 
-The high-level promise — *indistinguishable from human typing* — is built on a stack of independently calibrated effects, each grounded in published research on typing behavior or writing process. Together they reproduce the timing distributions, error patterns, and edit operations that human typists generate, both at the per-keystroke level and at the session/document level.
+The high-level promise, *indistinguishable from human typing*, is built on a stack of independently calibrated effects, each grounded in published research on typing behavior or writing process. Together they reproduce the timing distributions, error patterns, and edit operations that human typists generate, both at the per-keystroke level and at the session/document level.
 
 ### Per-keystroke timing
 
 | Effect | Description |
 |---|---|
-| **Profile-baseline IKI** | Inter-keystroke interval drawn from a lognormal distribution centered on `60_000 / (WPM × 5)` — the baseline mean for the chosen typist persona. |
+| **Profile-baseline IKI** | Inter-keystroke interval drawn from a lognormal distribution centered on `60_000 / (WPM × 5)`, the baseline mean for the chosen typist persona. |
 | **Bigram modulation** | Same-finger and same-hand bigrams (e.g., `ed`, `as`) are slower; alternating-hand bigrams (e.g., `th`, `is`) are faster. Multipliers from the Aalto 136M-keystroke dataset.<sup>[1]</sup> |
 | **Within-word burst** | Letters typed mid-word are 0.42×–0.85× the baseline IKI (profile-dependent). Real touch typists fire 3–6 keys at sub-100ms IKI within a word, separated by 300–500ms between-word pauses. Without this, every char ends up in its own operational-transformation chunk in collaborative editors. |
-| **End-of-word motor rolloff** | The last 1–3 letters of a word are typed faster than the word's average IKI — the typist's fingers are pre-loaded for the known ending. From Crump & Logan's hierarchical control experiments.<sup>[2]</sup> |
+| **End-of-word motor rolloff** | The last 1–3 letters of a word are typed faster than the word's average IKI; the typist's fingers are pre-loaded for the known ending. From Crump & Logan's hierarchical control experiments.<sup>[2]</sup> |
 | **Word-onset pause** | First letter of a long or uncommon word gets an extra "previewing the spelling" pause (probabilistic, scaling with word length up to several seconds for very long words). |
 | **Phrase acceleration** | First 1–4 words of a sentence are 2–15% slower than baseline; speed ramps to baseline by word 5. Real composition starts cautiously and accelerates as rhythm sets in. |
 | **Warmup ramp** | First 50 keys of a session are slightly slower (profile-dependent floor 0.42–0.85), ramping linearly to baseline. |
-| **Fatigue drift** | Multiplicative slowdown of ~0.15%/minute over the session — a small effect but noticeable over essays of 20+ minutes. |
-| **Dwell time** | Lognormal hold-down time per key (mean 55–100ms profile-dependent), with separate mean/sigma for backspaces (faster, more consistent — backspace bursts are motor-programmatic, not deliberate). |
+| **Fatigue drift** | Multiplicative slowdown of ~0.15%/minute over the session, a small effect but noticeable over essays of 20+ minutes. |
+| **Dwell time** | Lognormal hold-down time per key (mean 55–100ms profile-dependent), with separate mean/sigma for backspaces (faster and more consistent; backspace bursts are motor-programmatic, not deliberate). |
 | **Boundary pauses** | Sentence boundaries (after `.` `?` `!`) get 0.75–2.0s pauses with a small heavy tail; commas 250–1800ms; paragraph breaks 0.8–2.5s. Modeled after pause distributions in writing-process keystroke logs.<sup>[3]</sup> |
 | **Periodic review pauses** | Every 22–60 characters, a deferred pause fires at the next word boundary: 80% chance of a 0.4–2.5s "re-reading" hesitation, 20% chance of a 1.8–6s "thinking" pause. Reproduces the bursty WPM distribution real composition produces. |
-| **Mid-word thinking** | On long words (≥9 chars only), 1.2% chance of a brief 180–900ms hesitation between letters — modeling spelling uncertainty without producing the unnatural mid-word pauses that small-probability distributions over short words would create. |
+| **Mid-word thinking** | On long words (≥9 chars only), 1.2% chance of a brief 180–900ms hesitation between letters, modeling spelling uncertainty without producing the unnatural mid-word pauses that small-probability distributions over short words would create. |
 
 ### Error model
 
@@ -165,8 +165,8 @@ At sentence and paragraph boundaries, with calibrated probability (9% per senten
 2. `Option+Left` ×N to navigate 4–35 words back from the leading edge.
 3. `Option+Right` to land at the end of the target word.
 4. Pause 0.5–1.8s.
-5. Backspace through the word **character by character** (not via select-and-replace — character-by-character produces N individual delete operations in collaborative-editor logs, matching real human edits, rather than a single atomic delete-insert).
-6. Type the synonym (or retype the same word — the delete+insert pair is what matters).
+5. Backspace through the word **character by character** (not via select-and-replace; character-by-character produces N individual delete operations in collaborative-editor logs, matching real human edits, rather than a single atomic delete-insert).
+6. Type the synonym (or retype the same word; the delete+insert pair is what matters).
 7. Pause 0.7–3.0s.
 8. `Cmd+Down` to return cursor to end of document.
 
@@ -176,12 +176,12 @@ The 25–40% rate of non-leading-edge insertions during drafting is a well-docum
 
 `SessionPacer` injects multi-minute breaks at paragraph boundaries from a heavy-tailed distribution:
 
-- 70% of breaks: 25s–4min (lognormal mean 90s) — typical micro-break, phone glance, sip of coffee.
-- 30% of breaks: 5–15min (lognormal mean 6min) — the "got distracted" tail. Empirically present in writing-session keystroke logs.<sup>[3]</sup>
+- 70% of breaks: 25s–4min (lognormal mean 90s), typical micro-break, phone glance, sip of coffee.
+- 30% of breaks: 5–15min (lognormal mean 6min), the "got distracted" tail. Empirically present in writing-session keystroke logs.<sup>[3]</sup>
 
 ### Composition-time targeting (essay mode)
 
-`DurationTargeter` rescales all pauses so the total session time matches realistic composition rate (~19 WPM net including thinking and breaks — a constant well-documented in writing-process research.<sup>[5]</sup>) The raw 55–95 WPM of the typing model would otherwise produce sessions far shorter than authentic drafts of equivalent length.
+`DurationTargeter` rescales all pauses so the total session time matches realistic composition rate (~19 WPM net including thinking and breaks, a constant well-documented in writing-process research.<sup>[5]</sup>) The raw 55–95 WPM of the typing model would otherwise produce sessions far shorter than authentic drafts of equivalent length.
 
 ### Operational-transformation considerations
 
@@ -194,9 +194,9 @@ In collaborative editors, every keystroke produces an operation in the document'
 
 ### Safety against unintended input
 
-- **Global panic chord ⌥⌘.** — installs a process-wide CGEvent tap on launch that watches for the chord regardless of focused app. Triggers an abort within ~50ms.
-- **Modifier guard** — on session end (normal or aborted), explicitly releases all modifier keys to ensure no modifiers are left "stuck down" in the target app.
-- **Focus capture is a one-time decision** — the destination PID is captured at the end of the 3-second countdown; events go to that PID for the entire session via `CGEventPostToPid`, so the user can switch focus freely without redirecting typing.
+- **Global panic chord ⌥⌘.** installs a process-wide CGEvent tap on launch that watches for the chord regardless of focused app. Triggers an abort within ~50ms.
+- **Modifier guard**: on session end (normal or aborted), explicitly releases all modifier keys to ensure no modifiers are left "stuck down" in the target app.
+- **Focus capture is a one-time decision**: the destination PID is captured at the end of the 3-second countdown; events go to that PID for the entire session via `CGEventPostToPid`, so the user can switch focus freely without redirecting typing.
 
 ## Architecture
 
@@ -207,8 +207,8 @@ In collaborative editors, every keystroke produces an operation in the document'
 | [`SynonymDictionary`](Sources/Autotyper/Engine/SynonymDictionary.swift) | Loads `synonyms.txt`, filters length-similar single-word alternates. |
 | [`TypoInjector`](Sources/Autotyper/Engine/TypoInjector.swift) | Splices typo + recognition + backspace + retype sequences. |
 | [`QwertyAdjacency`](Sources/Autotyper/Engine/QwertyAdjacency.swift) | Adjacent-key lookup for plausible wrong-key selection. |
-| [`CommonWords`](Sources/Autotyper/Engine/CommonWords.swift) | Word frequency classification — drives error-rate and recognition-delay multipliers. |
-| [`WordComplexity`](Sources/Autotyper/Engine/WordComplexity.swift) | Word complexity scoring — drives within-word slowdown and onset pause. |
+| [`CommonWords`](Sources/Autotyper/Engine/CommonWords.swift) | Word frequency classification, drives error-rate and recognition-delay multipliers. |
+| [`WordComplexity`](Sources/Autotyper/Engine/WordComplexity.swift) | Word complexity scoring, drives within-word slowdown and onset pause. |
 | [`BigramTable`](Sources/Autotyper/Engine/BigramTable.swift) | Per-bigram IKI multipliers; sentence/paragraph boundary pause sampling. |
 | [`SpeedRegime`](Sources/Autotyper/Engine/SpeedRegime.swift) | Slow/fast regime alternation with per-regime persistence. |
 | [`MidDraftReviser`](Sources/Autotyper/Engine/MidDraftReviser.swift) | Sentence/paragraph-boundary jump-back-edit-return sequences. |
@@ -261,13 +261,13 @@ Calibration draws on published typing-behavior research and writing-process keys
    [DOI](https://doi.org/10.1037/a0020696)  
    Basis for end-of-word motor rolloff and word-onset pre-loading.
 
-3. **Inputlog research consortium** — Van Waes, Leijten, Conijn, et al. — long-running keystroke-logging research producing distributional data on typo type frequencies, recognition latencies, and pause structures in real composition.  
+3. **Inputlog research consortium** (Van Waes, Leijten, Conijn, et al.). Long-running keystroke-logging research producing distributional data on typo type frequencies, recognition latencies, and pause structures in real composition.  
    [Inputlog project](https://www.inputlog.net/)
 
-4. **Crossley, S. A., et al.** — writing-process feature research from the Educational Data Mining community on the linearity gap between authentic and transcribed writing — informing the mid-draft cursor-jump probabilities and the leading-edge-vs-non-leading-edge insertion ratios.  
+4. **Crossley, S. A., et al.** Writing-process feature research from the Educational Data Mining community on the linearity gap between authentic and transcribed writing, informing the mid-draft cursor-jump probabilities and the leading-edge-vs-non-leading-edge insertion ratios.  
    [EDM 2024 proceedings](https://educationaldatamining.org/edm2024/)
 
-5. **Composition-rate research** — the ~19 WPM net composition rate (typing time + thinking time + breaks, integrated across a multi-paragraph drafting session) is a robust constant across multiple decades of writing-process studies.
+5. **Composition-rate research.** The ~19 WPM net composition rate (typing time + thinking time + breaks, integrated across a multi-paragraph drafting session) is a robust constant across multiple decades of writing-process studies.
 
 The Aalto 136M-keystroke corpus in particular is the largest publicly available source of human typing data and underlies most of the per-keystroke timing model. We thank the Aalto User Interfaces group for releasing it.
 
