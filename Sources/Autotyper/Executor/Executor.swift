@@ -1,0 +1,186 @@
+import CoreGraphics
+import Foundation
+
+enum Executor {
+    /// Phase 1 fallback path: constant inter-key delay, no variance, no PID
+    /// targeting. Kept as a smoke-test entry point.
+    @MainActor
+    static func runConstantSpeed(text: String, ikiMs: Double, state: PlanState) async {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let location = CGEventTapLocation.cghidEventTap
+        let dwellMs: Double = 75
+        let perKeyMs = max(ikiMs, dwellMs + 5)
+        let postKeyPauseMs = perKeyMs - dwellMs
+
+        defer { ModifierGuard.flushAllModifiers(source: source, location: location) }
+
+        for (i, ch) in text.enumerated() {
+            if state.abortFlag { break }
+            guard let (code, needsShift) = KeycodeMap.keycode(for: ch) else { continue }
+            let mods: CGEventFlags = needsShift ? [.maskShift] : []
+            await emitTap(source: source, location: location, code: code, modifiers: mods, dwellMs: dwellMs, targetPid: 0)
+            state.charsTyped = i + 1
+            state.progress = Double(i + 1) / Double(max(state.totalChars, 1))
+            if postKeyPauseMs > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(postKeyPauseMs * 1_000_000))
+            }
+        }
+    }
+
+    /// Walk a pre-computed [KeyEvent] plan from the Planner. Honors `delayBeforeMs`
+    /// for IKI/boundary pauses and `dwellMs` for key-down hold.
+    ///
+    /// If `state.targetPid > 0`, events are posted via CGEventPostToPid directly
+    /// to the target process, bypassing the focused-app routing of the HID tap.
+    /// This lets the user switch focus to other apps mid-typing without
+    /// redirecting keystrokes.
+    @MainActor
+    static func runPlan(_ plan: [KeyEvent], state: PlanState) async {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let location = CGEventTapLocation.cghidEventTap
+        let targetPid = state.targetPid
+        let backspaceCode = Planner.backspaceKeycode
+
+        defer { ModifierGuard.flushAllModifiers(source: source, location: location) }
+
+        let sessionStart = Date()
+        // Rolling-window WPM: characters emitted in the trailing 5 s, scaled to
+        // a per-minute words rate (chars / 5).
+        let windowSeconds: TimeInterval = 5
+        var windowEvents: [TimeInterval] = []   // timestamps of recent .char taps
+        var lastSampleAt: TimeInterval = 0
+        var charsCommitted = 0
+        var deletions = 0
+        var edits = 0
+        var currentBackspaceRun = 0
+
+        var charIndex = 0
+        for event in plan {
+            if state.abortFlag { break }
+            await sleepWithAbortCheck(ms: event.delayBeforeMs, state: state)
+            if state.abortFlag { break }
+
+            switch event.action {
+            case .tap(let code, let mods):
+                await emitTap(source: source, location: location, code: code, modifiers: mods, dwellMs: event.dwellMs, targetPid: targetPid)
+                charIndex += 1
+                state.charsTyped = charIndex
+                if state.totalChars > 0 {
+                    state.progress = Double(charIndex) / Double(state.totalChars)
+                }
+
+                // Stats: classify the tap. Backspaces with no shift / option /
+                // command are deletions; everything else (with no command-arrow
+                // / option-arrow modifier) we count as a committed character.
+                let isBackspace = code == backspaceCode && mods.isEmpty
+                let isNavOrCommand = mods.contains(.maskCommand) || mods.contains(.maskAlternate)
+
+                if isBackspace {
+                    deletions += 1
+                    currentBackspaceRun += 1
+                } else if isNavOrCommand {
+                    // Navigation / find — not a character commit, not a deletion.
+                    if currentBackspaceRun >= 2 { edits += 1 }
+                    currentBackspaceRun = 0
+                } else {
+                    if currentBackspaceRun >= 2 { edits += 1 }
+                    currentBackspaceRun = 0
+                    charsCommitted += 1
+                    let now = Date().timeIntervalSince(sessionStart)
+                    windowEvents.append(now)
+                    while let first = windowEvents.first, now - first > windowSeconds {
+                        windowEvents.removeFirst()
+                    }
+                    if now - lastSampleAt >= 1.0 || lastSampleAt == 0 {
+                        let actualSpan = max(0.5, min(windowSeconds, now))
+                        let wpm = (Double(windowEvents.count) / 5.0) * (60.0 / actualSpan)
+                        state.sessionWpmSamples.append(WpmSample(elapsed: now, wpm: wpm))
+                        state.sessionCharsCommitted = charsCommitted
+                        state.sessionDeletions = deletions
+                        state.sessionEdits = edits
+                        lastSampleAt = now
+                    }
+                }
+            case .keyDown(let code, let mods):
+                emitDown(source: source, location: location, code: code, modifiers: mods, targetPid: targetPid)
+            case .keyUp(let code, let mods):
+                emitUp(source: source, location: location, code: code, modifiers: mods, targetPid: targetPid)
+            }
+        }
+        if currentBackspaceRun >= 2 { edits += 1 }
+        state.sessionCharsCommitted = charsCommitted
+        state.sessionDeletions = deletions
+        state.sessionEdits = edits
+        state.sessionDurationMs = Date().timeIntervalSince(sessionStart) * 1000
+    }
+
+    /// Sleep for `ms` total in 250ms slices. For pauses ≥ 5 s we publish
+    /// `pauseRemainingMs` so the UI can show "On break: 4:23".
+    @MainActor
+    private static func sleepWithAbortCheck(ms: Double, state: PlanState) async {
+        guard ms > 0 else { return }
+        let isLongPause = ms >= 5000
+        if isLongPause {
+            state.pauseRemainingMs = ms
+        }
+        let sliceMs: Double = 250
+        var remaining = ms
+        while remaining > 0 {
+            if state.abortFlag {
+                state.pauseRemainingMs = 0
+                return
+            }
+            let chunk = min(remaining, sliceMs)
+            try? await Task.sleep(nanoseconds: UInt64(chunk * 1_000_000))
+            remaining -= chunk
+            if isLongPause {
+                state.pauseRemainingMs = remaining
+            }
+        }
+        if isLongPause {
+            state.pauseRemainingMs = 0
+        }
+    }
+
+    @MainActor
+    private static func emitTap(
+        source: CGEventSource?,
+        location: CGEventTapLocation,
+        code: CGKeyCode,
+        modifiers: CGEventFlags,
+        dwellMs: Double,
+        targetPid: pid_t
+    ) async {
+        emitDown(source: source, location: location, code: code, modifiers: modifiers, targetPid: targetPid)
+        try? await Task.sleep(nanoseconds: UInt64(dwellMs * 1_000_000))
+        emitUp(source: source, location: location, code: code, modifiers: modifiers, targetPid: targetPid)
+        if modifiers.contains(.maskShift) {
+            if let ev = CGEvent(keyboardEventSource: source, virtualKey: KeycodeMap.shiftKey, keyDown: false) {
+                ev.flags = []
+                postEvent(ev, location: location, targetPid: targetPid)
+            }
+        }
+    }
+
+    private static func emitDown(source: CGEventSource?, location: CGEventTapLocation, code: CGKeyCode, modifiers: CGEventFlags, targetPid: pid_t) {
+        guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true) else { return }
+        ev.flags = modifiers
+        postEvent(ev, location: location, targetPid: targetPid)
+    }
+
+    private static func emitUp(source: CGEventSource?, location: CGEventTapLocation, code: CGKeyCode, modifiers: CGEventFlags, targetPid: pid_t) {
+        guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) else { return }
+        ev.flags = modifiers
+        postEvent(ev, location: location, targetPid: targetPid)
+    }
+
+    /// Post via PID-target if available (events stay locked to the target app
+    /// regardless of focus), else fall back to the HID tap.
+    private static func postEvent(_ event: CGEvent, location: CGEventTapLocation, targetPid: pid_t) {
+        if targetPid > 0 {
+            event.postToPid(targetPid)
+        } else {
+            event.post(tap: location)
+        }
+    }
+}
