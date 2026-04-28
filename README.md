@@ -33,22 +33,11 @@ The output is **indistinguishable from human typing** down to the per-keystroke 
 
 ## Install
 
-Build from source — the entire project is one Swift package, no external dependencies, no package manager required beyond the Swift toolchain shipped with Xcode Command Line Tools.
-
 ```bash
-xcode-select --install                                  # if not already installed
-git clone https://github.com/TeXtUtility/TeXtUtility.git ~/TeXtUtility
-cd ~/TeXtUtility
-./scripts/setup_dev_cert.sh                             # one-time: stable code-sign cert
-./scripts/build_app.sh                                  # build + install to ~/Applications
-open ~/Applications/TeXtUtility.app
+curl -fsSL https://raw.githubusercontent.com/TeXtUtility/TeXtUtility/main/install.sh | bash
 ```
 
-The first launch prompts for **Accessibility** permission (required to synthesize keystrokes). Toggle TeXtUtility on in *System Settings → Privacy & Security → Accessibility*.
-
-> **Why the cert step?** macOS keys Accessibility grants on the binary's code-signature designated requirement. Ad-hoc signatures change every rebuild, so a fresh ad-hoc binary loses its grant on every recompile. `setup_dev_cert.sh` creates a stable self-signed code-signing cert in your login keychain; `build_app.sh` then signs every build with it, and the grant persists across rebuilds.
-
-To update later: `cd ~/TeXtUtility && git pull && ./scripts/build_app.sh`.
+*Re-run any time to update or repair the installation.*
 
 ## Use
 
