@@ -247,7 +247,8 @@ enum Planner {
                 pendingExtraMs += ms
 
             case .backspace:
-                let iki = profile.backspaceIkiMs + pendingExtraMs
+                let pausePart = pendingExtraMs
+                let iki = profile.backspaceIkiMs + pausePart
                 pendingExtraMs = 0
                 let dwell = sampler.lognormalClamped(
                     mean: profile.dwellMeanMs * 0.85,
@@ -258,6 +259,7 @@ enum Planner {
                 out.append(KeyEvent(
                     action: .tap(code: backspaceKeycode, modifiers: []),
                     delayBeforeMs: iki,
+                    pauseMs: pausePart,
                     dwellMs: dwell
                 ))
                 elapsedMs += iki + dwell
@@ -270,9 +272,10 @@ enum Planner {
                 // Arrow nav, word jumps, Find (⌘F), selection extends. Real
                 // users hit these at hand-speed (250-450 ms per press), slower
                 // than typing. Don't apply bigram/word logic.
+                let pausePart = pendingExtraMs
                 let iki = sampler.lognormalClamped(
                     mean: 320, sigma: 0.4, lower: 150, upper: 1200
-                ) + pendingExtraMs
+                ) + pausePart
                 pendingExtraMs = 0
                 let dwell = sampler.lognormalClamped(
                     mean: profile.dwellMeanMs, sigma: profile.dwellSigma, lower: 40, upper: 180
@@ -280,6 +283,7 @@ enum Planner {
                 out.append(KeyEvent(
                     action: .tap(code: code, modifiers: mods),
                     delayBeforeMs: iki,
+                    pauseMs: pausePart,
                     dwellMs: dwell
                 ))
                 elapsedMs += iki + dwell
@@ -290,9 +294,10 @@ enum Planner {
                 // Held-arrow auto-repeat. macOS auto-repeat at default settings
                 // is ~30 ms per repeat after the initial 250 ms hold. We model
                 // this with a tight lognormal centered at 32 ms.
+                let pausePart = pendingExtraMs
                 let iki = sampler.lognormalClamped(
                     mean: 32, sigma: 0.18, lower: 22, upper: 60
-                ) + pendingExtraMs
+                ) + pausePart
                 pendingExtraMs = 0
                 let dwell = sampler.lognormalClamped(
                     mean: 24, sigma: 0.18, lower: 15, upper: 50
@@ -300,6 +305,7 @@ enum Planner {
                 out.append(KeyEvent(
                     action: .tap(code: code, modifiers: []),
                     delayBeforeMs: iki,
+                    pauseMs: pausePart,
                     dwellMs: dwell
                 ))
                 elapsedMs += iki + dwell
@@ -463,15 +469,19 @@ enum Planner {
                 // Composition: macro pace × bigram × warmup × fatigue × word
                 // complexity × rolloff × within-word burst × phrase-acceleration.
                 let mu = baseIki * bigram * warmup * fatigue * regimeSlowdown * currentWordSlowdown * rolloffMult * withinWordMult * phraseAccel
-                var iki = sampler.lognormal(mean: mu, sigma: profile.ikiSigma)
-                iki += BigramTable.boundaryPauseMs(prev: prevForBigram, current: c, sampler: sampler)
-                iki += wordOnsetExtra
-                iki += burstExtra
-                iki += thinkingExtra
-                iki += reviewExtra
-                iki += pendingExtraMs
+                // Clamp the typing-rhythm portion to a reasonable range. The
+                // pause portion (`pausePart` below) is allowed to be arbitrarily
+                // long so multi-minute SessionPacer breaks are honored as-is
+                // instead of being silently truncated to 25 s.
+                let typingPart = min(max(sampler.lognormal(mean: mu, sigma: profile.ikiSigma), 5), 25_000)
+                let pausePart = BigramTable.boundaryPauseMs(prev: prevForBigram, current: c, sampler: sampler)
+                              + wordOnsetExtra
+                              + burstExtra
+                              + thinkingExtra
+                              + reviewExtra
+                              + pendingExtraMs
                 pendingExtraMs = 0
-                iki = min(max(iki, 5), 25_000)
+                let iki = typingPart + pausePart
 
                 let dwell = sampler.lognormalClamped(
                     mean: profile.dwellMeanMs,
@@ -483,6 +493,7 @@ enum Planner {
                 out.append(KeyEvent(
                     action: .tap(code: code, modifiers: mods),
                     delayBeforeMs: iki,
+                    pauseMs: pausePart,
                     dwellMs: dwell
                 ))
 
@@ -539,6 +550,7 @@ enum Planner {
                 out[i] = KeyEvent(
                     action: curr.action,
                     delayBeforeMs: curr.delayBeforeMs + extra,
+                    pauseMs: curr.pauseMs + extra,
                     dwellMs: curr.dwellMs
                 )
             }

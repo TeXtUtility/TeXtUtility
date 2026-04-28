@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/TeXtUtility/TeXtUtility/main/instal
 
 4. Toggle **Essay mode** on for long-form composition (adds session breaks, mid-draft edits, and a pacing layer that targets ~19 WPM net composition speed, the realistic rate for actual writing including thinking time).
 5. Click **Start typing in 3s**. During the 3-second countdown, focus the target window. That captures the destination PID, and keystrokes will be delivered to it for the entire session even if you switch focus elsewhere.
-6. Wait. The menu-bar icon shows live progress. When done, a white checkmark flashes three times and stays solid; click the icon to open the post-session stats panel (WPM line chart, total time, character/word counts, deletions, edit operations).
+6. Wait. The menu-bar icon shows live progress while typing, and a pause icon with a live countdown to the next keystroke whenever the executor is in a pause — sentence boundaries, paragraph breaks, review re-reads, word-onset hesitations, mid-draft jump pauses, and multi-minute session breaks all surface as "1s" / "12s" / "1:30" countdowns. When done, a white checkmark flashes three times and stays solid; click the icon to open the post-session stats panel (WPM line chart, total time, character/word counts, deletions, edit operations).
 
 ### Pausing and stopping
 

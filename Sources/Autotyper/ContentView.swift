@@ -154,7 +154,11 @@ struct ContentView: View {
     }
 
     private func formatPause(_ ms: Double) -> String {
-        let total = Int(ceil(ms / 1000.0))
+        let totalSec = max(0, ms) / 1000.0
+        if totalSec < 60 {
+            return String(format: "%.0fs", ceil(totalSec))
+        }
+        let total = Int(ceil(totalSec))
         let m = total / 60
         let s = total % 60
         return String(format: "%d:%02d", m, s)

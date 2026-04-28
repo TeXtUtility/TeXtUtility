@@ -65,7 +65,7 @@ enum Executor {
             // pause length.
             pausedMsTotal += await waitWhilePaused(state: state)
             if state.abortFlag { break }
-            await sleepWithAbortCheck(ms: event.delayBeforeMs, state: state)
+            await sleepWithAbortCheck(ms: event.delayBeforeMs, pauseMs: event.pauseMs, state: state)
             if state.abortFlag { break }
             pausedMsTotal += await waitWhilePaused(state: state)
             if state.abortFlag { break }
@@ -124,14 +124,25 @@ enum Executor {
         state.sessionDurationMs = Date().timeIntervalSince(sessionStart) * 1000 - pausedMsTotal
     }
 
-    /// Sleep for `ms` total in 250ms slices. For pauses ≥ 5 s we publish
-    /// `pauseRemainingMs` so the UI can show "On break: 4:23". Honors
+    /// Sleep for `ms` total in 250 ms slices. The `pauseMs` portion (sentence
+    /// boundary, paragraph break, review pause, session break, etc.) is shown
+    /// to the user as a live countdown via `state.pauseRemainingMs`. Pure
+    /// typing-IKI delays (pauseMs == 0) tick down silently. Honors
     /// `state.isPaused` by stalling without decrementing remaining time.
     @MainActor
-    private static func sleepWithAbortCheck(ms: Double, state: PlanState) async {
+    private static func sleepWithAbortCheck(ms: Double, pauseMs: Double, state: PlanState) async {
         guard ms > 0 else { return }
-        let isLongPause = ms >= 5000
-        if isLongPause {
+        // We want pauseRemainingMs to reflect the FULL gap before the next
+        // keystroke whenever the gap is dominated by an explicit pause —
+        // from the user's perspective the cursor sits idle for `ms` ms total,
+        // so showing `ms` reads honestly. A small lower bound on `pauseMs`
+        // prevents tiny incidentals (sub-250 ms between-burst gaps, very
+        // short comma pauses) from flickering the menu-bar icon between
+        // progress and pause states. Every example the user named (between
+        // sentences, between paragraphs, review pauses, session breaks)
+        // clears this threshold easily.
+        let showCountdown = pauseMs >= 250
+        if showCountdown {
             state.pauseRemainingMs = ms
         }
         let sliceMs: Double = 250
@@ -152,11 +163,11 @@ enum Executor {
             let chunk = min(remaining, sliceMs)
             try? await Task.sleep(nanoseconds: UInt64(chunk * 1_000_000))
             remaining -= chunk
-            if isLongPause {
-                state.pauseRemainingMs = remaining
+            if showCountdown {
+                state.pauseRemainingMs = max(0, remaining)
             }
         }
-        if isLongPause {
+        if showCountdown {
             state.pauseRemainingMs = 0
         }
     }
