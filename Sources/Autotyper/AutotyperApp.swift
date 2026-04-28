@@ -41,8 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 /// updates live as the executor advances.
 struct MenuBarIconView: View {
     @EnvironmentObject var state: PlanState
-    @State private var checkmarkVisible: Bool = true
-    @State private var flashStarted: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -50,6 +48,9 @@ struct MenuBarIconView: View {
             if state.hasUnclaimedCompletion {
                 // Don't render extra text, the checkmark icon stands alone.
                 EmptyView()
+            } else if state.isPaused {
+                Text("⏸")
+                    .font(.system(size: 11, weight: .semibold))
             } else if state.pauseRemainingMs > 0 {
                 Text(pauseText)
                     .font(.system(size: 11, weight: .semibold).monospacedDigit())
@@ -59,31 +60,33 @@ struct MenuBarIconView: View {
             }
         }
         .onChange(of: state.hasUnclaimedCompletion) { newValue in
-            if newValue && !flashStarted {
-                flashStarted = true
-                runCompletionFlash()
-            } else if !newValue {
-                flashStarted = false
-                checkmarkVisible = true
+            if newValue {
+                Task { @MainActor in await runCompletionFlash() }
+            } else {
+                state.checkmarkVisible = true
             }
         }
     }
 
-    /// Three blinks then solid. Each step is held long enough that the
-    /// menu-bar label's NSImage rasterization picks it up: SwiftUI
-    /// animations don't render through NSStatusItem-backed labels (the
-    /// label is regenerated on each @State change, not interpolated), so
-    /// we drive the flash as discrete state assignments without
-    /// `withAnimation`.
-    private func runCompletionFlash() {
-        let pattern: [Bool] = [true, false, true, false, true, false, true]
-        let interval: Double = 0.22
-        checkmarkVisible = pattern[0]
-        for (i, visible) in pattern.enumerated().dropFirst() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + interval * Double(i)) {
-                self.checkmarkVisible = visible
+    /// Three blinks then solid. Driven from a single MainActor Task so SwiftUI
+    /// can't coalesce the writes — each write awaits a sleep before the next,
+    /// guaranteeing the NSImage rasterization for MenuBarExtra picks up
+    /// every step.
+    @MainActor
+    private func runCompletionFlash() async {
+        let pattern: [Bool] = [false, true, false, true, false, true]
+        let stepNs: UInt64 = 240_000_000   // 0.24 s
+        for visible in pattern {
+            try? await Task.sleep(nanoseconds: stepNs)
+            // Bail out if the user reopened the popover and claimed completion
+            // mid-flash — leave the checkmark solid.
+            if !state.hasUnclaimedCompletion {
+                state.checkmarkVisible = true
+                return
             }
+            state.checkmarkVisible = visible
         }
+        state.checkmarkVisible = true
     }
 
     private var percentText: String {
@@ -105,7 +108,10 @@ struct MenuBarIconView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .imageScale(.medium)
                     .foregroundStyle(.white)
-                    .opacity(checkmarkVisible ? 1 : 0)
+                    .opacity(state.checkmarkVisible ? 1 : 0)
+            } else if state.isPaused {
+                Image(systemName: "pause.circle.fill")
+                    .imageScale(.medium)
             } else if state.pauseRemainingMs > 0 {
                 Image(systemName: "pause.circle")
                     .imageScale(.medium)

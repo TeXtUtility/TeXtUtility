@@ -53,11 +53,21 @@ enum Executor {
         var deletions = 0
         var edits = 0
         var currentBackspaceRun = 0
+        // Total ms paused so the WPM rolling window discounts time spent
+        // user-paused (otherwise WPM looks artificially low after a long pause).
+        var pausedMsTotal: Double = 0
 
         var charIndex = 0
         for event in plan {
             if state.abortFlag { break }
+            // If user paused mid-stream, stall here BEFORE consuming this
+            // event's IKI so we don't extend the inter-keystroke gap by the
+            // pause length.
+            pausedMsTotal += await waitWhilePaused(state: state)
+            if state.abortFlag { break }
             await sleepWithAbortCheck(ms: event.delayBeforeMs, state: state)
+            if state.abortFlag { break }
+            pausedMsTotal += await waitWhilePaused(state: state)
             if state.abortFlag { break }
 
             switch event.action {
@@ -86,7 +96,7 @@ enum Executor {
                     if currentBackspaceRun >= 2 { edits += 1 }
                     currentBackspaceRun = 0
                     charsCommitted += 1
-                    let now = Date().timeIntervalSince(sessionStart)
+                    let now = Date().timeIntervalSince(sessionStart) - pausedMsTotal / 1000.0
                     windowEvents.append(now)
                     while let first = windowEvents.first, now - first > windowSeconds {
                         windowEvents.removeFirst()
@@ -111,11 +121,12 @@ enum Executor {
         state.sessionCharsCommitted = charsCommitted
         state.sessionDeletions = deletions
         state.sessionEdits = edits
-        state.sessionDurationMs = Date().timeIntervalSince(sessionStart) * 1000
+        state.sessionDurationMs = Date().timeIntervalSince(sessionStart) * 1000 - pausedMsTotal
     }
 
     /// Sleep for `ms` total in 250ms slices. For pauses ≥ 5 s we publish
-    /// `pauseRemainingMs` so the UI can show "On break: 4:23".
+    /// `pauseRemainingMs` so the UI can show "On break: 4:23". Honors
+    /// `state.isPaused` by stalling without decrementing remaining time.
     @MainActor
     private static func sleepWithAbortCheck(ms: Double, state: PlanState) async {
         guard ms > 0 else { return }
@@ -130,6 +141,14 @@ enum Executor {
                 state.pauseRemainingMs = 0
                 return
             }
+            // User-paused: stall here, holding `pauseRemainingMs` steady.
+            while state.isPaused && !state.abortFlag {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            if state.abortFlag {
+                state.pauseRemainingMs = 0
+                return
+            }
             let chunk = min(remaining, sliceMs)
             try? await Task.sleep(nanoseconds: UInt64(chunk * 1_000_000))
             remaining -= chunk
@@ -140,6 +159,17 @@ enum Executor {
         if isLongPause {
             state.pauseRemainingMs = 0
         }
+    }
+
+    /// Stall while `state.isPaused` is true; returns the total ms waited.
+    @MainActor
+    private static func waitWhilePaused(state: PlanState) async -> Double {
+        guard state.isPaused else { return 0 }
+        let start = Date()
+        while state.isPaused && !state.abortFlag {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return Date().timeIntervalSince(start) * 1000
     }
 
     @MainActor

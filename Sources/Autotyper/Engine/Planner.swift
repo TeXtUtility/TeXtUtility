@@ -179,7 +179,6 @@ enum Planner {
             // drafting.
             stream = MidDraftReviser.inject(
                 stream: stream,
-                text: text,
                 params: .standard,
                 sampler: sampler
             )
@@ -286,6 +285,25 @@ enum Planner {
                 elapsedMs += iki + dwell
                 keyIndex += 1
                 // Don't update prevTyped — arrow nav doesn't change the bigram context.
+
+            case .fastArrow(let code):
+                // Held-arrow auto-repeat. macOS auto-repeat at default settings
+                // is ~30 ms per repeat after the initial 250 ms hold. We model
+                // this with a tight lognormal centered at 32 ms.
+                let iki = sampler.lognormalClamped(
+                    mean: 32, sigma: 0.18, lower: 22, upper: 60
+                ) + pendingExtraMs
+                pendingExtraMs = 0
+                let dwell = sampler.lognormalClamped(
+                    mean: 24, sigma: 0.18, lower: 15, upper: 50
+                )
+                out.append(KeyEvent(
+                    action: .tap(code: code, modifiers: []),
+                    delayBeforeMs: iki,
+                    dwellMs: dwell
+                ))
+                elapsedMs += iki + dwell
+                keyIndex += 1
 
             case .char(let c):
                 // After a backspace burst, treat the next char as a fresh start
@@ -500,7 +518,7 @@ enum Planner {
                 }
             case .backspace:
                 if !word.isEmpty { word.removeLast() }
-            case .extraDelayMs, .rawKey:
+            case .extraDelayMs, .rawKey, .fastArrow:
                 break
             }
             i += 1

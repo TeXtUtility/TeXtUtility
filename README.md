@@ -60,10 +60,12 @@ curl -fsSL https://raw.githubusercontent.com/TeXtUtility/TeXtUtility/main/instal
 5. Click **Start typing in 3s**. During the 3-second countdown, focus the target window. That captures the destination PID, and keystrokes will be delivered to it for the entire session even if you switch focus elsewhere.
 6. Wait. The menu-bar icon shows live progress. When done, a white checkmark flashes three times and stays solid; click the icon to open the post-session stats panel (WPM line chart, total time, character/word counts, deletions, edit operations).
 
-### Stopping
+### Pausing and stopping
 
-- **In-app**: ⌘. (or the Stop button)
-- **Globally** (from any app, instant): **⌥⌘.**. A global event tap intercepts the chord even while typing is in flight.
+- **Pause / resume in-app**: ⌘P (or the Pause / Resume button). The executor stalls between events, holding any in-flight break timer steady; tapping ⌘P again resumes from the same point.
+- **Pause / resume globally**: **⌥⌘P**, recognized by the same event tap that handles the panic chord — works from any app while typing is in flight.
+- **Stop in-app**: ⌘. (or the Stop button)
+- **Stop globally** (from any app, instant): **⌥⌘.**. A global event tap intercepts the chord even while typing is in flight.
 
 ## How it works
 
@@ -162,13 +164,14 @@ Dictionary covers ~2400 unique words across academic vocabulary, common verbs, c
 At sentence and paragraph boundaries, with calibrated probability (9% per sentence, +20% at paragraph breaks, ≥18 words between consecutive jumps):
 
 1. Pause 0.6–2.8s.
-2. `Option+Left` ×N to navigate 4–35 words back from the leading edge.
-3. `Option+Right` to land at the end of the target word.
-4. Pause 0.5–1.8s.
-5. Backspace through the word **character by character** (not via select-and-replace; character-by-character produces N individual delete operations in collaborative-editor logs, matching real human edits, rather than a single atomic delete-insert).
-6. Type the synonym (or retype the same word; the delete+insert pair is what matters).
-7. Pause 0.7–3.0s.
-8. `Cmd+Down` to return cursor to end of document.
+2. `Left arrow` ×N to walk back exactly N characters from the cursor's current position, where N is the precise grapheme distance to the end of the chosen target word (4–35 words back). Plain `Left arrow` is used instead of `Option+Left` because the word-boundary semantics of `Option+Left` differ across editors (apostrophes, hyphens, numbers, punctuation can be treated differently), which previously caused the cursor to land in the wrong position and inserted edits at unintended points. Single-character relative navigation lands deterministically in every macOS app. The arrow run uses an auto-repeat-style cadence (~30ms inter-press) so the navigation reads as a held key rather than a flurry of taps.
+3. Pause 0.5–1.8s.
+4. Backspace through the word **character by character** (not via select-and-replace; character-by-character produces N individual delete operations in collaborative-editor logs, matching real human edits, rather than a single atomic delete-insert).
+5. Type the synonym (or retype the same word; the delete+insert pair is what matters).
+6. Pause 0.7–3.0s.
+7. `Right arrow` ×N to return the cursor to the end of the document. After backspacing N chars and typing M new ones, distance from cursor to the new end equals the original character offset, so the same N right-arrow presses land cleanly back at the leading edge.
+
+The reviser also mutates its internal model of the typed buffer to reflect each replacement, so subsequent jumps compute their character offsets against the post-edit document state rather than a hypothetical buffer that has diverged from what was actually typed.
 
 The 25–40% rate of non-leading-edge insertions during drafting is a well-documented signature of authentic writing process.<sup>[4]</sup>
 
@@ -195,6 +198,7 @@ In collaborative editors, every keystroke produces an operation in the document'
 ### Safety against unintended input
 
 - **Global panic chord ⌥⌘.** installs a process-wide CGEvent tap on launch that watches for the chord regardless of focused app. Triggers an abort within ~50ms.
+- **Global pause chord ⌥⌘P** uses the same tap to flip a pause flag on the executor, which stalls between events without dropping any state. The pause holds in-flight break timers steady; tapping the chord (or the in-app Pause button / ⌘P) again resumes from the same point.
 - **Modifier guard**: on session end (normal or aborted), explicitly releases all modifier keys to ensure no modifiers are left "stuck down" in the target app.
 - **Focus capture is a one-time decision**: the destination PID is captured at the end of the 3-second countdown; events go to that PID for the entire session via `CGEventPostToPid`, so the user can switch focus freely without redirecting typing.
 

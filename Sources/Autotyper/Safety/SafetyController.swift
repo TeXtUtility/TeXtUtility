@@ -23,6 +23,7 @@ final class SafetyController: @unchecked Sendable {
         var abortRequested: Bool = false
         var lastAbortReason: String?
         var onAbort: (@Sendable (String) -> Void)?
+        var onPauseToggle: (@Sendable () -> Void)?
     }
 
     private init() {}
@@ -66,12 +67,16 @@ final class SafetyController: @unchecked Sendable {
     // MARK: - Per-job state
 
     @MainActor
-    func startTypingSession(onAbort: @escaping @Sendable (String) -> Void) {
+    func startTypingSession(
+        onAbort: @escaping @Sendable (String) -> Void,
+        onPauseToggle: @escaping @Sendable () -> Void
+    ) {
         lock.withLock { s in
             s.isTypingActive = true
             s.abortRequested = false
             s.lastAbortReason = nil
             s.onAbort = onAbort
+            s.onPauseToggle = onPauseToggle
         }
         // Focus-change observer is intentionally NOT started here. Events are
         // delivered via CGEventPostToPid to the captured target PID, so the
@@ -83,6 +88,7 @@ final class SafetyController: @unchecked Sendable {
         lock.withLock { s in
             s.isTypingActive = false
             s.onAbort = nil
+            s.onPauseToggle = nil
         }
     }
 
@@ -95,6 +101,13 @@ final class SafetyController: @unchecked Sendable {
             return s.onAbort
         }
         cb?(reason)
+    }
+
+    func requestPauseToggle() {
+        let cb: (@Sendable () -> Void)? = lock.withLock { s in
+            return s.isTypingActive ? s.onPauseToggle : nil
+        }
+        cb?()
     }
 
     var isAbortRequested: Bool { lock.withLock { $0.abortRequested } }
@@ -118,6 +131,8 @@ final class SafetyController: @unchecked Sendable {
         // ONLY automatic abort path now — user input and focus changes no
         // longer abort, since we deliver events via CGEventPostToPid to the
         // target PID and let the user roam free.
+        //
+        // Pause/resume chord: ⌥⌘P (35 = p). Same swallow-and-toggle pattern.
         if type == .keyDown {
             let keycode = event.getIntegerValueField(.keyboardEventKeycode)
             let flags = event.flags
@@ -126,6 +141,11 @@ final class SafetyController: @unchecked Sendable {
             // 47 = period
             if keycode == 47 && hasCmd && hasOpt {
                 controller.requestAbort(reason: "Panic chord ⌥⌘.")
+                return nil  // swallow
+            }
+            // 35 = p
+            if keycode == 35 && hasCmd && hasOpt {
+                controller.requestPauseToggle()
                 return nil  // swallow
             }
         }

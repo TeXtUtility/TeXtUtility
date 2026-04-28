@@ -121,7 +121,13 @@ struct ContentView: View {
 
     private var statusRow: some View {
         HStack(spacing: 8) {
-            if state.pauseRemainingMs > 0 {
+            if state.isPaused {
+                Image(systemName: "pause.circle.fill")
+                    .foregroundStyle(.blue)
+                Text("Paused")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+            } else if state.pauseRemainingMs > 0 {
                 Image(systemName: "pause.circle.fill")
                     .foregroundStyle(.orange)
                 Text("On break: \(formatPause(state.pauseRemainingMs))")
@@ -164,6 +170,11 @@ struct ContentView: View {
             .controlSize(.large)
             .disabled(state.isRunning || state.pastedText.isEmpty || !hasAccessibility)
 
+            Button(state.isPaused ? "Resume" : "Pause") { state.togglePause() }
+                .keyboardShortcut("p", modifiers: [.command])
+                .controlSize(.large)
+                .disabled(!state.isRunning || state.countdownSeconds > 0)
+
             Button("Stop") { state.requestAbort() }
                 .keyboardShortcut(".", modifiers: [.command])
                 .controlSize(.large)
@@ -173,7 +184,9 @@ struct ContentView: View {
 
     private var footnote: some View {
         HStack {
-            Text("Stop: ⌘. (in app)")
+            Text("Pause: ⌘P")
+            Text("·")
+            Text("Stop: ⌘.")
             Text("·")
             Text("Panic: ⌥⌘. (global)")
             Spacer()
@@ -232,12 +245,19 @@ struct ContentView: View {
             state.statusMessage = "Typing"
 
             let weakState = state
-            SafetyController.shared.startTypingSession { reason in
-                Task { @MainActor in
-                    weakState.requestAbort()
-                    weakState.statusMessage = "Aborted: \(reason)"
+            SafetyController.shared.startTypingSession(
+                onAbort: { reason in
+                    Task { @MainActor in
+                        weakState.requestAbort()
+                        weakState.statusMessage = "Aborted: \(reason)"
+                    }
+                },
+                onPauseToggle: {
+                    Task { @MainActor in
+                        weakState.togglePause()
+                    }
                 }
-            }
+            )
             defer { SafetyController.shared.endTypingSession() }
 
             let profile = ProfileParams.from(state.selectedProfile)

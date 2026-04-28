@@ -33,6 +33,16 @@ final class PlanState: ObservableObject {
     /// True when the post-session stats panel should be shown (set when the
     /// popover opens after an unclaimed completion; cleared on next Start).
     @Published var showStatsPanel: Bool = false
+    /// Drives the menu-bar checkmark flash. Toggled directly from a
+    /// MainActor task so SwiftUI's NSImage rasterization for MenuBarExtra
+    /// picks up each step (a sequence of asyncAfter @State writes inside
+    /// the icon view was being coalesced by SwiftUI before rasterization).
+    @Published var checkmarkVisible: Bool = true
+
+    /// Pause/resume. The executor watches `isPaused` and stalls inside the
+    /// per-event loop while it's true. When paused mid-event we stop the
+    /// dwell-time clock so the per-key delay isn't artificially inflated.
+    @Published var isPaused: Bool = false
 
     // Session stats — populated by the Executor during a run, read by the
     // stats panel after completion.
@@ -51,6 +61,8 @@ final class PlanState: ObservableObject {
 
     func requestAbort() { abortFlag = true }
 
+    func togglePause() { isPaused.toggle() }
+
     func resetForRun() {
         abortFlag = false
         progress = 0
@@ -61,6 +73,8 @@ final class PlanState: ObservableObject {
         targetAppName = ""
         hasUnclaimedCompletion = false
         showStatsPanel = false
+        checkmarkVisible = true
+        isPaused = false
         sessionWpmSamples = []
         sessionDurationMs = 0
         sessionInputChars = 0

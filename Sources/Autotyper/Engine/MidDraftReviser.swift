@@ -14,11 +14,19 @@ import CoreGraphics
 /// otherwise see zero mid-draft jumps.
 ///
 /// CRITICAL design point: uses backspace-and-retype, NOT select-and-replace.
-/// `Shift+Option+Right` then typing a replacement produces a single atomic
-/// delete-and-insert OT op in Google Docs — the canonical autotype tell that
-/// Writing Replay flags as "large text insertion." Backspacing through the word
-/// produces N individual delete ops; typing the replacement produces M individual
-/// insert ops. That's how a human's edit looks in the OT log.
+/// Backspacing through the word produces N individual delete ops; typing the
+/// replacement produces M individual insert ops. That's how a human's edit
+/// looks in the OT log. Select-and-replace would produce a single atomic
+/// delete-and-insert which is the canonical autotype tell.
+///
+/// Navigation uses **plain Left arrow × character offset** (not Option+Left × word
+/// count). Option+Left's "word boundary" semantics differ across editors — some
+/// treat apostrophes, hyphens, or numbers as boundaries differently — which makes
+/// it desync from our internal word index and lands the cursor in the wrong place.
+/// Plain Left arrow moves exactly one grapheme per press, identical across every
+/// macOS app, so we land deterministically. We use a fast auto-repeat-style cadence
+/// (`fastArrow`) so the navigation looks like a held key rather than 200 individual
+/// taps.
 enum MidDraftReviser {
     struct Params {
         /// Per-sentence-boundary probability of injecting a jump.
@@ -33,6 +41,9 @@ enum MidDraftReviser {
         var minWordsToInject: Int
         /// Min words between consecutive jumps so they don't pile up.
         var minWordsBetweenJumps: Int
+        /// Cap on character-distance to jump back. A 70-word jump back can be
+        /// 400+ chars; capping prevents very-long arrow runs that look unnatural.
+        var maxJumpBackChars: Int
         var preJumpPauseMs: ClosedRange<Double>
         var preTypePauseMs: ClosedRange<Double>
         var postEditPauseMs: ClosedRange<Double>
@@ -43,6 +54,7 @@ enum MidDraftReviser {
             jumpBackRange: 4...35,
             minWordsToInject: 12,
             minWordsBetweenJumps: 18,    // longer cooldown so jumps feel rare
+            maxJumpBackChars: 320,
             preJumpPauseMs: 600.0...2800.0,
             preTypePauseMs: 500.0...1800.0,
             postEditPauseMs: 700.0...3000.0
@@ -54,27 +66,34 @@ enum MidDraftReviser {
             jumpBackRange: 5...60,
             minWordsToInject: 8,
             minWordsBetweenJumps: 8,
+            maxJumpBackChars: 500,
             preJumpPauseMs: 800.0...4000.0,
             preTypePauseMs: 700.0...2500.0,
             postEditPauseMs: 1000.0...4500.0
         )
     }
 
+    private struct WordSpan {
+        let start: Int   // index into typedBuffer
+        let end: Int     // exclusive
+    }
+
     /// Process a [LogicalKey] stream, injecting jump-back-edit-return sequences at
     /// sentence and paragraph boundaries.
+    ///
+    /// `typedBuffer` is built from the input stream's `.char` and `.backspace`
+    /// events AND mutated to reflect each injected replacement, so subsequent
+    /// jumps compute their character offsets against the post-edit doc state
+    /// rather than a hypothetical buffer that diverges from reality.
     static func inject(
         stream: [LogicalKey],
-        text: String,
         params: Params,
         sampler: Sampler
     ) -> [LogicalKey] {
-        let allWords = extractWords(text)
-        guard !allWords.isEmpty else { return stream }
-
         var out: [LogicalKey] = []
         out.reserveCapacity(stream.count + 64)
 
-        var typedBuffer = ""
+        var typedBuffer: [Character] = []
         var prevWasNewline = false
         var wordsCommittedAtLastJump = 0
 
@@ -86,7 +105,7 @@ enum MidDraftReviser {
                 typedBuffer.append(c)
             case .backspace:
                 if !typedBuffer.isEmpty { typedBuffer.removeLast() }
-            case .extraDelayMs, .rawKey:
+            case .extraDelayMs, .rawKey, .fastArrow:
                 continue
             }
 
@@ -106,9 +125,11 @@ enum MidDraftReviser {
                         prevWasNewline = true
                     }
                 } else if c == " " {
-                    let last2 = typedBuffer.suffix(3).dropLast()  // chars before this space
-                    if let prev = last2.last, ".?!".contains(prev) {
-                        isBoundary = true
+                    if typedBuffer.count >= 2 {
+                        let prev = typedBuffer[typedBuffer.count - 2]
+                        if prev == "." || prev == "?" || prev == "!" {
+                            isBoundary = true
+                        }
                     }
                     prevWasNewline = false
                 } else {
@@ -118,8 +139,8 @@ enum MidDraftReviser {
 
             guard isBoundary else { continue }
 
-            // Compute words committed to typedBuffer.
-            let wordsCommitted = countWords(in: typedBuffer)
+            let wordSpans = findWordSpans(in: typedBuffer)
+            let wordsCommitted = wordSpans.count
             guard wordsCommitted >= params.minWordsToInject else { continue }
             guard wordsCommitted - wordsCommittedAtLastJump >= params.minWordsBetweenJumps else { continue }
 
@@ -127,8 +148,8 @@ enum MidDraftReviser {
             guard sampler.bool(probability: p) else { continue }
 
             let injected = appendJump(
-                wordsCommitted: wordsCommitted,
-                allWords: allWords,
+                typedBuffer: &typedBuffer,
+                wordSpans: wordSpans,
                 params: params,
                 sampler: sampler,
                 out: &out
@@ -142,101 +163,104 @@ enum MidDraftReviser {
     // MARK: - Jump emission
 
     private static func appendJump(
-        wordsCommitted: Int,
-        allWords: [String],
+        typedBuffer: inout [Character],
+        wordSpans: [WordSpan],
         params: Params,
         sampler: Sampler,
         out: inout [LogicalKey]
     ) -> Bool {
-        let maxAllowed = wordsCommitted - 3
+        let wordsCommitted = wordSpans.count
+        let maxAllowed = wordsCommitted - 3   // never touch the last 3 words
         guard maxAllowed >= params.jumpBackRange.lowerBound else { return false }
         let upper = min(maxAllowed, params.jumpBackRange.upperBound)
         let lower = params.jumpBackRange.lowerBound
         guard upper >= lower else { return false }
-        let jumpBack = lower + Int(sampler.uniform() * Double(upper - lower + 1))
 
-        let targetIdx = wordsCommitted - jumpBack
-        guard targetIdx >= 0 && targetIdx < allWords.count else { return false }
-        let targetWord = allWords[targetIdx]
+        // Try a few jump-back distances if the target word is unsuitable
+        // (too short / no letters / no synonym available). Bail after a
+        // small number of attempts so we don't loop forever.
+        for _ in 0..<5 {
+            let jumpBack = lower + Int(sampler.uniform() * Double(upper - lower + 1))
+            let targetWordIdx = wordsCommitted - jumpBack
+            guard targetWordIdx >= 0 && targetWordIdx < wordsCommitted else { continue }
 
-        guard targetWord.count >= 3,
-              targetWord.contains(where: { $0.isLetter }) else { return false }
+            let span = wordSpans[targetWordIdx]
+            let targetWord = String(typedBuffer[span.start..<span.end])
+            guard targetWord.count >= 3,
+                  targetWord.contains(where: { $0.isLetter }) else { continue }
 
-        let replacement: String = {
-            if let alt = SynonymDictionary.shared.pickAlternate(for: targetWord, sampler: sampler) {
-                return matchCase(alt, like: targetWord)
+            let charsFromEndToWordEnd = typedBuffer.count - span.end
+            // Cap absolute distance — a 70-word jump back is 400+ chars of
+            // arrow nav, which is both slow and unrealistic.
+            guard charsFromEndToWordEnd <= params.maxJumpBackChars else { continue }
+            // Defensive: never emit a zero-distance jump.
+            guard charsFromEndToWordEnd > 0 else { continue }
+
+            let replacement: String = {
+                if let alt = SynonymDictionary.shared.pickAlternate(for: targetWord, sampler: sampler) {
+                    return matchCase(alt, like: targetWord)
+                }
+                return targetWord
+            }()
+
+            // 1. Pre-jump pause.
+            out.append(.extraDelayMs(sampler.uniform(in: params.preJumpPauseMs)))
+
+            // 2. Left arrow × char-distance — relative-to-current navigation
+            //    via plain arrow keys. Cursor lands at end of target word.
+            for _ in 0..<charsFromEndToWordEnd {
+                out.append(.fastArrow(code: Keycodes.leftArrow))
             }
-            return targetWord
-        }()
 
-        // 1. Pre-jump pause.
-        out.append(.extraDelayMs(sampler.uniform(in: params.preJumpPauseMs)))
+            // 3. Pre-type pause.
+            out.append(.extraDelayMs(sampler.uniform(in: params.preTypePauseMs)))
 
-        // 2. Option+Left × jumpBack — navigate to start of target word.
-        for _ in 0..<jumpBack {
-            out.append(.rawKey(code: Keycodes.leftArrow, modifiers: [.maskAlternate]))
+            // 4. Backspace through the word — N individual delete ops.
+            for _ in 0..<targetWord.count {
+                out.append(.backspace)
+            }
+
+            // 5. Type replacement.
+            for ch in replacement {
+                out.append(.char(ch))
+            }
+
+            // 6. Settle pause.
+            out.append(.extraDelayMs(sampler.uniform(in: params.postEditPauseMs)))
+
+            // 7. Right arrow × char-distance — return to end of doc. After
+            //    backspacing N and typing M chars, distance from cursor to
+            //    new end equals the original `charsFromEndToWordEnd`.
+            for _ in 0..<charsFromEndToWordEnd {
+                out.append(.fastArrow(code: Keycodes.rightArrow))
+            }
+
+            // 8. Mutate typedBuffer to reflect the replacement so future
+            //    jumps compute character offsets against the real doc state.
+            typedBuffer.replaceSubrange(span.start..<span.end, with: Array(replacement))
+
+            return true
         }
-
-        // 3. Option+Right (no shift) — jump to END of target word, ready to backspace.
-        out.append(.rawKey(code: Keycodes.rightArrow, modifiers: [.maskAlternate]))
-
-        // 4. Pre-type pause.
-        out.append(.extraDelayMs(sampler.uniform(in: params.preTypePauseMs)))
-
-        // 5. Backspace through the word — N individual delete ops, no atomic op.
-        for _ in 0..<targetWord.count {
-            out.append(.backspace)
-        }
-
-        // 6. Type replacement.
-        for ch in replacement {
-            out.append(.char(ch))
-        }
-
-        // 7. Settle pause.
-        out.append(.extraDelayMs(sampler.uniform(in: params.postEditPauseMs)))
-
-        // 8. ⌘↓ — return cursor to end of doc.
-        out.append(.rawKey(code: Keycodes.downArrow, modifiers: [.maskCommand]))
-
-        return true
+        return false
     }
 
     // MARK: - Helpers
 
-    private static func extractWords(_ text: String) -> [String] {
-        var out: [String] = []
-        let chars = Array(text)
+    private static func findWordSpans(in chars: [Character]) -> [WordSpan] {
+        var spans: [WordSpan] = []
         var i = 0
         while i < chars.count {
             if chars[i].isLetter || chars[i].isNumber {
-                var j = i
-                while j < chars.count && (chars[j].isLetter || chars[j].isNumber || chars[j] == "'") {
-                    j += 1
+                let start = i
+                while i < chars.count && (chars[i].isLetter || chars[i].isNumber || chars[i] == "'") {
+                    i += 1
                 }
-                out.append(String(chars[i..<j]))
-                i = j
+                spans.append(WordSpan(start: start, end: i))
             } else {
                 i += 1
             }
         }
-        return out
-    }
-
-    private static func countWords(in text: String) -> Int {
-        var count = 0
-        var inWord = false
-        for c in text {
-            if c.isLetter || c.isNumber {
-                if !inWord {
-                    count += 1
-                    inWord = true
-                }
-            } else {
-                inWord = false
-            }
-        }
-        return count
+        return spans
     }
 
     private static func matchCase(_ alt: String, like original: String) -> String {
