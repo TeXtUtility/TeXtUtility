@@ -146,7 +146,7 @@ Typo distribution from the writing-process literature: 60% insertion, 20% substi
 
 Recognition delay is lognormal with mean 250ms scaled by **word frequency**: very common words (`the`, `and`) are caught instantly; uncommon polysyllabic words take 250–500ms longer. Common-word error rate is also higher (motor automation overshoots), uncommon-word error rate is lower (deliberate typing).
 
-Per-letter base error rate is profile-dependent: 0.7% for Touch-Typist, 3.2% for Hunt-Peck.
+Per-letter base error rate is profile-dependent: 0.7% for Touch-Typist, 3.2% for Hunt-Peck. The base rate is further modulated by the [late-essay fatigue model](#late-essay-fatigue-long-sessions-only) on long sessions — error rate climbs across the final 20% of the source, ramping to ~1.75× by the closing keystroke.
 
 ### Vocabulary dwelling
 
@@ -172,6 +172,25 @@ At sentence and paragraph boundaries, with calibrated probability (9% per senten
 7. `Right arrow` ×N to return the cursor to the end of the document. After backspacing N chars and typing M new ones, distance from cursor to the new end equals the original character offset, so the same N right-arrow presses land cleanly back at the leading edge.
 
 The reviser also mutates its internal model of the typed buffer to reflect each replacement, so subsequent jumps compute their character offsets against the post-edit document state rather than a hypothetical buffer that has diverged from what was actually typed.
+
+On long sessions, the per-boundary jump probability is scaled down across the final 20% of the source via the [late-essay fatigue model](#late-essay-fatigue-long-sessions-only), reflecting the universal observation that tired writers stop revising and just push for the finish line.
+
+### Late-essay fatigue (long sessions only)
+
+Real long-form drafting shows a U-curve in care: cautious opening, fluent middle, sloppier-and-less-revised end. The fatigue model captures the end-of-session drift — across the final 20% of the source, error rate climbs and mid-draft revision rate drops, mimicking the typist's declining attention as they push toward "done." Specifically, at the closing keystroke:
+
+- Per-letter error rate is multiplied by **~1.75×**
+- Mid-draft jump probability is multiplied by **~0.35×**
+
+Both effects ramp linearly from 1.0 over the tail, so a position 90% through the source is at half-strength fatigue (roughly 1.375× error, 0.675× revision) and the end is at full strength.
+
+The effect is **gated on session length**:
+
+- **Below ~700 words (3500 chars)**: zero modulation. A short note doesn't run long enough for fatigue to plausibly set in, and applying the effect to it would produce noticeable end-of-text artifacts on a session a real human would type without a coffee break.
+- **Between ~700 and ~1400 words**: the magnitude scales linearly so a 700-word and 1400-word essay don't sit on opposite sides of a hard cliff.
+- **Above ~1400 words**: full strength.
+
+The revision-rate ramp only fires when essay mode is on (the mid-draft reviser is essay-mode-only). The error-rate ramp applies regardless of essay mode — fatigue is a typing-behavior effect, not strictly an anti-detection one.
 
 The 25–40% rate of non-leading-edge insertions during drafting is a well-documented signature of authentic writing process.<sup>[4]</sup>
 
@@ -218,6 +237,7 @@ In collaborative editors, every keystroke produces an operation in the document'
 | [`MidDraftReviser`](Sources/Autotyper/Engine/MidDraftReviser.swift) | Sentence/paragraph-boundary jump-back-edit-return sequences. |
 | [`SessionPacer`](Sources/Autotyper/Engine/SessionPacer.swift) | Multi-minute paragraph-boundary breaks. |
 | [`DurationTargeter`](Sources/Autotyper/Engine/DurationTargeter.swift) | Total-session-time rescaling. |
+| [`FatigueModel`](Sources/Autotyper/Engine/FatigueModel.swift) | Long-session error-rate ramp-up and revision-rate ramp-down across the final 20% of the source. |
 | [`Sampler`](Sources/Autotyper/Engine/Sampler.swift) | Seeded RNG for reproducible plans. |
 | [`Executor`](Sources/Autotyper/Executor/Executor.swift) | Walks the plan, posts CGEvents to the target PID. |
 | [`KeycodeMap`](Sources/Autotyper/Executor/KeycodeMap.swift) | Character → virtual keycode + shift-required lookup. |

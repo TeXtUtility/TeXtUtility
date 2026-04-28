@@ -85,13 +85,23 @@ enum MidDraftReviser {
     /// events AND mutated to reflect each injected replacement, so subsequent
     /// jumps compute their character offsets against the post-edit doc state
     /// rather than a hypothetical buffer that diverges from reality.
+    ///
+    /// `fatigue` (if non-nil and the session clears the length threshold) scales
+    /// the per-boundary jump probability down across the final fraction of the
+    /// source text — a tired writer revises less, just wants to finish.
     static func inject(
         stream: [LogicalKey],
         params: Params,
-        sampler: Sampler
+        sampler: Sampler,
+        fatigue: FatigueParams? = nil,
+        totalSourceChars: Int = 0
     ) -> [LogicalKey] {
         var out: [LogicalKey] = []
         out.reserveCapacity(stream.count + 64)
+
+        let fatigueIntensity = (fatigue != nil && totalSourceChars > 0)
+            ? FatigueModel.intensity(totalChars: totalSourceChars, params: fatigue!)
+            : 0
 
         var typedBuffer: [Character] = []
         var prevWasNewline = false
@@ -144,7 +154,16 @@ enum MidDraftReviser {
             guard wordsCommitted >= params.minWordsToInject else { continue }
             guard wordsCommitted - wordsCommittedAtLastJump >= params.minWordsBetweenJumps else { continue }
 
-            let p = params.jumpProbabilityPerSentence + (isParagraph ? params.jumpProbabilityParagraphBoost : 0)
+            var p = params.jumpProbabilityPerSentence + (isParagraph ? params.jumpProbabilityParagraphBoost : 0)
+            if let f = fatigue, fatigueIntensity > 0 {
+                let progress = min(1.0, Double(typedBuffer.count) / Double(totalSourceChars))
+                p *= FatigueModel.multiplier(
+                    progress: progress,
+                    intensity: fatigueIntensity,
+                    params: f,
+                    endValue: f.revisionMultiplierAtEnd
+                )
+            }
             guard sampler.bool(probability: p) else { continue }
 
             let injected = appendJump(

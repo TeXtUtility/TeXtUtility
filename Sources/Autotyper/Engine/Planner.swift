@@ -152,6 +152,13 @@ enum Planner {
         essayMode: Bool,
         sampler: Sampler
     ) -> [KeyEvent] {
+        let totalSourceChars = text.count
+        // Late-essay fatigue: error rate ramps up and revision rate ramps
+        // down across the final fraction of the source. Gated on session
+        // length (zero effect below ~700 words, full above ~1400) so short
+        // notes don't get the long-form drift.
+        let fatigueParams: FatigueParams = .standard
+
         let synonymParams = SynonymDweller.Params(
             rate: profile.synonymDwellRate,
             paragraphStartBoost: 1.6,
@@ -165,7 +172,12 @@ enum Planner {
             recognitionSigma: 0.5,
             allowOnFirstChar: false
         )
-        var stream = TypoInjector.toLogicalKeys(scripts: scripts, params: typoParams, sampler: sampler)
+        var stream = TypoInjector.toLogicalKeys(
+            scripts: scripts,
+            params: typoParams,
+            fatigue: fatigueParams,
+            sampler: sampler
+        )
 
         if essayMode {
             stream = SessionPacer.inject(
@@ -180,7 +192,9 @@ enum Planner {
             stream = MidDraftReviser.inject(
                 stream: stream,
                 params: .standard,
-                sampler: sampler
+                sampler: sampler,
+                fatigue: fatigueParams,
+                totalSourceChars: totalSourceChars
             )
             // Stretch existing pauses so total session ≈ realistic composition
             // pace (~45 s per 100 chars including breaks).

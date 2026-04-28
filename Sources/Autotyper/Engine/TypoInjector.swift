@@ -49,24 +49,51 @@ enum TypoInjector {
     /// `.dwell` blocks are emitted as type-pause-backspace-retype with no nested
     /// errors (the dwell motion is itself a deliberate error/correction; layering
     /// typos on top would over-noise it).
+    ///
+    /// `fatigue` (if non-nil and the session clears the length threshold) ramps
+    /// the per-character error rate up across the final fraction of the source
+    /// text, modeling end-of-session attention drift in long-form drafting.
     static func toLogicalKeys(
         scripts: [TextScript],
         params: Params,
+        fatigue: FatigueParams? = nil,
         thinkingPauseMs: Double = 900,
         realizationPauseMs: Double = 450,
         sampler: Sampler
     ) -> [LogicalKey] {
+        let totalChars = scripts.reduce(0) { acc, s in
+            switch s {
+            case .run(let t): return acc + t.count
+            case .dwell(_, let then): return acc + then.count
+            }
+        }
+        let fatigueIntensity = fatigue.map {
+            FatigueModel.intensity(totalChars: totalChars, params: $0)
+        } ?? 0
+
         var out: [LogicalKey] = []
+        var globalPos = 0
         for script in scripts {
             switch script {
             case .run(let text):
-                injectInto(text: text, params: params, sampler: sampler, out: &out)
+                injectInto(
+                    text: text,
+                    params: params,
+                    fatigue: fatigue,
+                    fatigueIntensity: fatigueIntensity,
+                    globalStartPos: globalPos,
+                    totalChars: totalChars,
+                    sampler: sampler,
+                    out: &out
+                )
+                globalPos += text.count
             case .dwell(let typed, let then):
                 emitDwell(typed: typed, then: then,
                           thinkingPauseMs: thinkingPauseMs,
                           realizationPauseMs: realizationPauseMs,
                           sampler: sampler,
                           out: &out)
+                globalPos += then.count
             }
         }
         return out
@@ -79,11 +106,25 @@ enum TypoInjector {
         sampler: Sampler
     ) -> [LogicalKey] {
         var out: [LogicalKey] = []
-        injectInto(text: text, params: params, sampler: sampler, out: &out)
+        injectInto(
+            text: text, params: params,
+            fatigue: nil, fatigueIntensity: 0,
+            globalStartPos: 0, totalChars: text.count,
+            sampler: sampler, out: &out
+        )
         return out
     }
 
-    private static func injectInto(text: String, params: Params, sampler: Sampler, out: inout [LogicalKey]) {
+    private static func injectInto(
+        text: String,
+        params: Params,
+        fatigue: FatigueParams?,
+        fatigueIntensity: Double,
+        globalStartPos: Int,
+        totalChars: Int,
+        sampler: Sampler,
+        out: inout [LogicalKey]
+    ) {
         let chars = Array(text)
         let words = wordContext(for: chars)
 
@@ -96,7 +137,16 @@ enum TypoInjector {
                 && QwertyAdjacency.adjacent(of: c, sampler: sampler) != nil
 
             let cls: CommonWords.Class = words[i].map(CommonWords.classify) ?? .neutral
-            let rate = params.baseErrorRate * CommonWords.errorRateMultiplier(for: cls)
+            var rate = params.baseErrorRate * CommonWords.errorRateMultiplier(for: cls)
+            if let f = fatigue, fatigueIntensity > 0, totalChars > 0 {
+                let progress = Double(globalStartPos + i) / Double(totalChars)
+                rate *= FatigueModel.multiplier(
+                    progress: progress,
+                    intensity: fatigueIntensity,
+                    params: f,
+                    endValue: f.errorMultiplierAtEnd
+                )
+            }
 
             if canInject && sampler.bool(probability: rate) {
                 let consumed = injectError(
