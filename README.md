@@ -146,7 +146,7 @@ Typo distribution from the writing-process literature: 60% insertion, 20% substi
 
 Recognition delay is lognormal with mean 250ms scaled by **word frequency**: very common words (`the`, `and`) are caught instantly; uncommon polysyllabic words take 250–500ms longer. Common-word error rate is also higher (motor automation overshoots), uncommon-word error rate is lower (deliberate typing).
 
-Per-letter base error rate is profile-dependent: 0.7% for Touch-Typist, 3.2% for Hunt-Peck. The base rate is further modulated by the [late-essay fatigue model](#late-essay-fatigue-long-sessions-only) on long sessions — error rate climbs across the final 20% of the source, ramping to ~1.75× by the closing keystroke.
+Per-letter base error rate is profile-dependent: 0.7% for Touch-Typist, 3.2% for Hunt-Peck. The base rate is further modulated by the late-essay fatigue model on long sessions — error rate climbs across the final 20% of the source, ramping to ~1.75× by the closing keystroke.
 
 ### Vocabulary dwelling
 
@@ -173,7 +173,7 @@ At sentence and paragraph boundaries, with calibrated probability (9% per senten
 
 The reviser also mutates its internal model of the typed buffer to reflect each replacement, so subsequent jumps compute their character offsets against the post-edit document state rather than a hypothetical buffer that has diverged from what was actually typed.
 
-On long sessions, the per-boundary jump probability is scaled down across the final 20% of the source via the [late-essay fatigue model](#late-essay-fatigue-long-sessions-only), reflecting the universal observation that tired writers stop revising and just push for the finish line.
+On long sessions, the per-boundary jump probability is scaled down across the final 20% of the source via the late-essay fatigue model, reflecting the universal observation that tired writers stop revising and just push for the finish line.
 
 ### Late-essay fatigue (long sessions only)
 
