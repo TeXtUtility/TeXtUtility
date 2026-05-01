@@ -314,15 +314,36 @@ struct SessionStatsView: View {
     @ViewBuilder
     private var chart: some View {
         if state.sessionWpmSamples.count >= 2 {
-            Chart(state.sessionWpmSamples) { sample in
+            // Long sessions emit hundreds-to-thousands of raw samples; the
+            // smoother bins them into ~150 evenly-spaced averages so the line
+            // shows the overall pace shape instead of the per-second noise.
+            // Below that count the raw series is returned unchanged.
+            let samples = WpmSmoother.smooth(samples: state.sessionWpmSamples)
+            let totalElapsed = samples.last?.elapsed ?? 0
+            // Pick X-axis units so the labels stay short:
+            //   <2 min  → seconds
+            //   <2 hr   → minutes
+            //   ≥2 hr   → hours (e.g. a 4-hour novella session)
+            let (xScale, xLabel): (Double, String) = {
+                if totalElapsed < 120 { return (1, "seconds") }
+                if totalElapsed < 7200 { return (60, "minutes") }
+                return (3600, "hours")
+            }()
+            // Lock the X domain to the actual data range so rendering doesn't
+            // leave the line shifted toward one edge when SwiftUI Charts
+            // auto-fits a long, dense series in a narrow popover.
+            let xMin = (samples.first?.elapsed ?? 0) / xScale
+            let xMax = max(xMin + 0.001, totalElapsed / xScale)
+            Chart(samples) { sample in
                 LineMark(
-                    x: .value("t", sample.elapsed),
+                    x: .value("t", sample.elapsed / xScale),
                     y: .value("WPM", sample.wpm)
                 )
                 .interpolationMethod(.monotone)
                 .foregroundStyle(.blue)
             }
-            .chartXAxisLabel("seconds")
+            .chartXScale(domain: xMin...xMax)
+            .chartXAxisLabel(xLabel)
             .chartYAxisLabel("WPM")
             .frame(height: 140)
         } else {
