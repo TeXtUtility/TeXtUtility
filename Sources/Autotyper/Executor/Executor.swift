@@ -135,13 +135,15 @@ enum Executor {
         // We want pauseRemainingMs to reflect the FULL gap before the next
         // keystroke whenever the gap is dominated by an explicit pause —
         // from the user's perspective the cursor sits idle for `ms` ms total,
-        // so showing `ms` reads honestly. A small lower bound on `pauseMs`
-        // prevents tiny incidentals (sub-250 ms between-burst gaps, very
-        // short comma pauses) from flickering the menu-bar icon between
-        // progress and pause states. Every example the user named (between
-        // sentences, between paragraphs, review pauses, session breaks)
-        // clears this threshold easily.
-        let showCountdown = pauseMs >= 250
+        // so showing `ms` reads honestly. The 1-second floor on `pauseMs`
+        // means the menu-bar icon only switches into pause state for gaps
+        // that are clearly "the typist stopped for a moment" rather than
+        // typing rhythm — between-burst gaps, short comma pauses, and
+        // recognition delays under a second all stay invisible. Sentence
+        // boundaries (~1.5 s), paragraph breaks (~1.5 s), review pauses
+        // (1–6 s), word-onset hesitations on long words, mid-draft jump
+        // pauses, and SessionPacer breaks all clear this easily.
+        let showCountdown = pauseMs >= 1000
         if showCountdown {
             state.pauseRemainingMs = ms
         }
