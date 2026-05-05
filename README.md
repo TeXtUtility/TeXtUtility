@@ -30,6 +30,7 @@ The output is **indistinguishable from human typing** down to the per-keystroke 
 - **Form filling for input-validating services.** Some web forms throttle, animate against, or reject instant-paste input; TeXtUtility's per-keystroke pacing satisfies those checks.
 - **Application QA.** Testing keyboard-handling code paths, debouncing logic, autosave timing, and IME interactions benefits from realistic input streams rather than uniform 10ms-spaced events.
 - **Writing-process replay.** Reproducing realistic drafting patterns (mid-document edits, vocabulary substitutions, session breaks) for research demos or teaching.
+- **Free and Open Source.** TeXtUtility is licensed under the MIT License.
 
 ## Install
 
@@ -310,3 +311,17 @@ The Aalto 136M-keystroke corpus in particular is the largest publicly available 
 - **OpenSSL** / **LibreSSL** for the self-signed code-signing cert generation step.
 
 No third-party Swift packages are consumed at compile time. The dependency graph is the macOS SDK and nothing else.
+
+## Contributing
+
+To report bugs and suggest features, use the [issue tracker][issues]. If
+you have code to contribute, open a pull request. Small, focused changes
+are easier to review and land. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+a few conventions.
+
+## License
+
+Copyright © TeXtUtility contributors. Distributed under the MIT License.
+See [LICENSE](LICENSE) for the full text.
+
+[issues]: https://github.com/TeXtUtility/TeXtUtility/issues
