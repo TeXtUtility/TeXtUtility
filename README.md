@@ -271,7 +271,7 @@ swift build -c release
 ./scripts/setup_dev_cert.sh
 ```
 
-The build script handles icon generation (auto-trims transparent borders of `~/Downloads/keypress.png` if present, scales to all macOS iconset sizes, builds the `.icns`), assembles the `.app` bundle with `Info.plist`, codesigns with the persistent self-signed cert when present (falls back to ad-hoc), and re-registers the bundle with LaunchServices.
+The build script handles icon generation (uses the bundled `Sources/Autotyper/Resources/AppLogo.png` by default, or auto-trims transparent borders of a custom PNG when `ICON_SRC=/path/to/master.png` is set; scales to all macOS iconset sizes; builds the `.icns`), assembles the `.app` bundle with `Info.plist`, codesigns with the persistent self-signed cert when present (falls back to ad-hoc), and re-registers the bundle with LaunchServices.
 
 ## Acknowledgments
 

@@ -10,9 +10,11 @@
 #
 # Optional env vars:
 #   INSTALL_DIR   where to clone the repo  (default: ~/TeXtUtility)
-#   ICON_SRC      source PNG for the app icon  (default: ~/Downloads/keypress.png)
-#                 not required — the repo ships a pre-cropped AppLogo.png
-#                 that's used if ICON_SRC isn't found
+#   ICON_SRC      source PNG to regenerate the app icon from. Default is the
+#                 bundled Sources/Autotyper/Resources/AppLogo.png that ships
+#                 in the repo, so install works on a fresh clone with no
+#                 extra files on disk. Override only if you want to swap in
+#                 a new icon master.
 #
 set -euo pipefail
 

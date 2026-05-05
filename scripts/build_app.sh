@@ -28,24 +28,40 @@ APP_NAME="TeXtUtility"
 BUNDLE_ID="com.local.textutility"
 APP_DST="$HOME/Applications/${APP_NAME}.app"
 
-ICON_SRC="${ICON_SRC:-$HOME/Downloads/keypress.png}"
+# The repo ships a pre-cropped 512×512 logo at Sources/Autotyper/Resources/
+# AppLogo.png. That file is the default icon source so a fresh `git clone`
+# can build with no extra files on disk. Set ICON_SRC=/path/to/your.png
+# to override (e.g. when refreshing the icon from a higher-res master);
+# in that case the bundled AppLogo.png is regenerated from your source.
+BUNDLED_LOGO="$ROOT/Sources/Autotyper/Resources/AppLogo.png"
+ICON_SRC="${ICON_SRC:-$BUNDLED_LOGO}"
 BUILD_TMP="$ROOT/.build/app-build"
 
 echo "[1/5] icon"
 if [ ! -f "$ICON_SRC" ]; then
     echo "icon source not found: $ICON_SRC" >&2
-    echo "set ICON_SRC=/path/to/png or place a file at that location" >&2
+    echo "set ICON_SRC=/path/to/png, or restore the bundled $BUNDLED_LOGO" >&2
     exit 1
 fi
 rm -rf "$BUILD_TMP/AppIcon.iconset" "$BUILD_TMP/AppIcon.icns"
 mkdir -p "$BUILD_TMP"
-# Also write the cropped logo into Sources/Autotyper/Resources so the next
-# `swift build` picks it up via SPM and the in-app UI can load it via
-# Bundle.module.
-swift "$ROOT/scripts/build_icon.swift" \
-    "$ICON_SRC" \
-    "$BUILD_TMP/AppIcon.iconset" \
-    "$ROOT/Sources/Autotyper/Resources/AppLogo.png"
+if [ "$ICON_SRC" = "$BUNDLED_LOGO" ]; then
+    # Default path: use the bundled logo as-is. Don't pass the third arg
+    # since that would have build_icon.swift regenerate the logo from
+    # itself, which is both a no-op and a write-while-read hazard.
+    echo "  source: bundled AppLogo.png"
+    swift "$ROOT/scripts/build_icon.swift" \
+        "$ICON_SRC" \
+        "$BUILD_TMP/AppIcon.iconset"
+else
+    # Custom source: regenerate the bundled logo too so the next swift
+    # build picks it up via SPM and the in-app UI shows the new icon.
+    echo "  source: $ICON_SRC"
+    swift "$ROOT/scripts/build_icon.swift" \
+        "$ICON_SRC" \
+        "$BUILD_TMP/AppIcon.iconset" \
+        "$BUNDLED_LOGO"
+fi
 iconutil -c icns "$BUILD_TMP/AppIcon.iconset" -o "$BUILD_TMP/AppIcon.icns"
 
 echo "[2/5] swift build ($CONFIG)"
