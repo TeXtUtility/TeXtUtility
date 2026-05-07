@@ -206,6 +206,29 @@ The 25–40% rate of non-leading-edge insertions during drafting is a well-docum
 
 `DurationTargeter` rescales all pauses so the total session time matches realistic composition rate (~19 WPM net including thinking and breaks, a constant well-documented in writing-process research.<sup>[5]</sup>) The raw 55–95 WPM of the typing model would otherwise produce sessions far shorter than authentic drafts of equivalent length.
 
+### Chinese (Mandarin via pinyin)
+
+When the pasted source contains hanzi, TeXtUtility automatically routes it through a pinyin path so a pinyin IME running in the target app can convert the typed pinyin back into characters. The popover shows a "Chinese detected — typing via pinyin" hint as soon as hanzi appear in the input, so you know to switch your IME on before hitting Start.
+
+Each hanzi is transliterated to its base-letters Mandarin pinyin (no tone marks) and followed by a space, which is the gesture most pinyin IMEs use to commit the first candidate:
+
+- `你好`         → `ni hao ` (typed; IME converts back to `你好`)
+- `我喜欢学习中文。` → `wo xi huan xue xi zhong wen .`
+
+CJK punctuation (`。`, `，`, `！`, `？`, fullwidth digits, etc.) is converted to its ASCII equivalent so the IME maps it back to the matching Chinese form. ASCII / Latin characters in mixed text (`Hello 你好`) pass through unchanged.
+
+The transliteration uses the standard ICU MandarinLatin transform shipped with macOS — no external pinyin dictionary is bundled. The transform picks the most common reading for polyphones (`行` = xíng / háng, `重` = zhòng / chóng), so the IME may produce a different character than intended in those edge cases. Most common hanzi are unambiguous.
+
+When the Chinese path is active the English-only realism layers are skipped because their models don't translate:
+
+- **Typo injection** is off — QWERTY-adjacency wrong-key swaps would produce wrong pinyin syllables that the IME can't recover from gracefully.
+- **Mid-draft revisions** are off — the word-boundary detection relies on English-letter-class transitions and the synonym dictionary is English-only.
+- **Synonym dwelling** is off for the same reason.
+
+What stays on: the per-keystroke timing model (baseline IKI, dwell, warmup, fatigue, regime drift, end-of-word rolloff), `SessionPacer` paragraph breaks, and `DurationTargeter` total-session targeting — all language-agnostic. Bigram timing also stays on and naturally produces plausible per-syllable bursts on the expanded pinyin: `ni` types as a within-word burst, the trailing space sits at word-boundary speed, the next syllable starts fresh.
+
+You'll need a pinyin IME enabled in the target app — macOS ships one in **System Settings → Keyboard → Input Sources → Pinyin – Simplified**. Switch the input source to Pinyin in the target app before clicking Start. The 3-second countdown and PID-capture flow are unchanged.
+
 ### Operational-transformation considerations
 
 In collaborative editors, every keystroke produces an operation in the document's revision log. Several fidelity choices are specifically designed so the resulting log is indistinguishable from human authoring:
@@ -239,6 +262,7 @@ In collaborative editors, every keystroke produces an operation in the document'
 | [`SessionPacer`](Sources/Autotyper/Engine/SessionPacer.swift) | Multi-minute paragraph-boundary breaks. |
 | [`DurationTargeter`](Sources/Autotyper/Engine/DurationTargeter.swift) | Total-session-time rescaling. |
 | [`FatigueModel`](Sources/Autotyper/Engine/FatigueModel.swift) | Long-session error-rate ramp-up and revision-rate ramp-down across the final 20% of the source. |
+| [`PinyinTransliterator`](Sources/Autotyper/Engine/PinyinTransliterator.swift) | Hanzi detection and Mandarin → ASCII pinyin expansion for the Chinese-via-IME path. |
 | [`Sampler`](Sources/Autotyper/Engine/Sampler.swift) | Seeded RNG for reproducible plans. |
 | [`Executor`](Sources/Autotyper/Executor/Executor.swift) | Walks the plan, posts CGEvents to the target PID. |
 | [`KeycodeMap`](Sources/Autotyper/Executor/KeycodeMap.swift) | Character → virtual keycode + shift-required lookup. |

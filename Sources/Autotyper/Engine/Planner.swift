@@ -152,6 +152,21 @@ enum Planner {
         essayMode: Bool,
         sampler: Sampler
     ) -> [KeyEvent] {
+        // Source containing CJK characters is routed through a separate
+        // pinyin path: hanzi gets transliterated to ASCII pinyin syllables
+        // for the target app's IME to convert back, and the English-only
+        // layers (typo injector, mid-draft reviser, synonym dweller) are
+        // skipped because their models — QWERTY adjacency, English-letter
+        // word boundaries, English synonym dictionary — don't translate.
+        if PinyinTransliterator.containsHanzi(text) {
+            return planChineseViaPinyin(
+                text: text,
+                profile: profile,
+                essayMode: essayMode,
+                sampler: sampler
+            )
+        }
+
         let totalSourceChars = text.count
         // Late-essay fatigue: error rate ramps up and revision rate ramps
         // down across the final fraction of the source. Gated on session
@@ -198,6 +213,43 @@ enum Planner {
             )
             // Stretch existing pauses so total session ≈ realistic composition
             // pace (~45 s per 100 chars including breaks).
+            let avgIki = 60_000.0 / (profile.targetWpm * 5.0)
+            stream = DurationTargeter.scale(
+                stream: stream,
+                params: .realistic,
+                avgIkiMs: avgIki
+            )
+        }
+
+        return planFromStream(stream, profile: profile, sampler: sampler)
+    }
+
+    /// Pinyin path: source has CJK characters, so we transliterate to
+    /// ASCII pinyin syllables (one per hanzi, space-separated for IME
+    /// commit) and run the resulting stream through the standard
+    /// `planFromStream` timing model. SessionPacer and DurationTargeter
+    /// are language-agnostic and stay; TypoInjector / MidDraftReviser /
+    /// SynonymDweller are skipped because their English-only models
+    /// would produce nonsense on hanzi-source text. The bigram and
+    /// within-word burst logic in `planFromStream` still fires on the
+    /// expanded pinyin and produces plausible per-syllable bursts —
+    /// "ni" types fast, the trailing space sits at word-boundary speed,
+    /// the next syllable starts fresh.
+    private static func planChineseViaPinyin(
+        text: String,
+        profile: ProfileParams,
+        essayMode: Bool,
+        sampler: Sampler
+    ) -> [KeyEvent] {
+        let pinyin = PinyinTransliterator.expandToPinyinAscii(text)
+        var stream: [LogicalKey] = pinyin.map { .char($0) }
+
+        if essayMode {
+            stream = SessionPacer.inject(
+                stream: stream,
+                params: .standard,
+                sampler: sampler
+            )
             let avgIki = 60_000.0 / (profile.targetWpm * 5.0)
             stream = DurationTargeter.scale(
                 stream: stream,
