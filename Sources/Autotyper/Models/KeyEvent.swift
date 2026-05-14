@@ -15,6 +15,13 @@ struct KeyEvent {
         case tap(code: CGKeyCode, modifiers: CGEventFlags)
         case keyDown(code: CGKeyCode, modifiers: CGEventFlags)
         case keyUp(code: CGKeyCode, modifiers: CGEventFlags)
+        /// Insert a Unicode string directly into the target app via
+        /// `CGEventKeyboardSetUnicodeString`. The OS posts the string
+        /// verbatim, bypassing keycode lookup AND any active IME. Used
+        /// for hanzi and other non-ASCII characters where keycode-based
+        /// typing isn't possible or where IME ambiguity would produce
+        /// the wrong character.
+        case unicodeTap(string: String)
     }
 
     let action: Action

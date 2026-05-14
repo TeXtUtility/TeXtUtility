@@ -63,6 +63,7 @@ enum DurationTargeter {
             case .backspace: charCount += 1
             case .rawKey: charCount += 1
             case .fastArrow: charCount += 1
+            case .unicode: charCount += 1
             case .extraDelayMs(let ms): existingExtraMs += ms
             }
         }

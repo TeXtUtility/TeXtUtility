@@ -115,6 +115,33 @@ enum Executor {
                 emitDown(source: source, location: location, code: code, modifiers: mods, targetPid: targetPid)
             case .keyUp(let code, let mods):
                 emitUp(source: source, location: location, code: code, modifiers: mods, targetPid: targetPid)
+            case .unicodeTap(let str):
+                await emitUnicodeTap(source: source, location: location, string: str, dwellMs: event.dwellMs, targetPid: targetPid)
+                charIndex += 1
+                state.charsTyped = charIndex
+                if state.totalChars > 0 {
+                    state.progress = Double(charIndex) / Double(state.totalChars)
+                }
+                // Unicode insertions count as a committed char for the
+                // rolling-WPM window even though they don't carry an
+                // English-letter classification.
+                if currentBackspaceRun >= 2 { edits += 1 }
+                currentBackspaceRun = 0
+                charsCommitted += 1
+                let now = Date().timeIntervalSince(sessionStart) - pausedMsTotal / 1000.0
+                windowEvents.append(now)
+                while let first = windowEvents.first, now - first > windowSeconds {
+                    windowEvents.removeFirst()
+                }
+                if now - lastSampleAt >= 1.0 || lastSampleAt == 0 {
+                    let actualSpan = max(0.5, min(windowSeconds, now))
+                    let wpm = (Double(windowEvents.count) / 5.0) * (60.0 / actualSpan)
+                    state.sessionWpmSamples.append(WpmSample(elapsed: now, wpm: wpm))
+                    state.sessionCharsCommitted = charsCommitted
+                    state.sessionDeletions = deletions
+                    state.sessionEdits = edits
+                    lastSampleAt = now
+                }
             }
         }
         if currentBackspaceRun >= 2 { edits += 1 }
@@ -203,6 +230,37 @@ enum Executor {
                 postEvent(ev, location: location, targetPid: targetPid)
             }
         }
+    }
+
+    /// Emit a Unicode string as a key-tap. The OS replaces whatever
+    /// character the keycode would have produced with the attached
+    /// string, so the exact source character lands in the target app
+    /// regardless of input source / IME state. We use keycode 49 (space)
+    /// as the virtual key because some apps refuse Unicode events with
+    /// keycode 0; the attached string overrides the keycode for any app
+    /// that honors `CGEventKeyboardSetUnicodeString` (Safari, TextEdit,
+    /// Notes, Pages, Notion, VS Code, every modern macOS app).
+    @MainActor
+    private static func emitUnicodeTap(
+        source: CGEventSource?,
+        location: CGEventTapLocation,
+        string: String,
+        dwellMs: Double,
+        targetPid: pid_t
+    ) async {
+        let utf16: [UniChar] = Array(string.utf16)
+        guard !utf16.isEmpty,
+              let downEvent = CGEvent(keyboardEventSource: source, virtualKey: 49, keyDown: true),
+              let upEvent = CGEvent(keyboardEventSource: source, virtualKey: 49, keyDown: false)
+        else { return }
+        utf16.withUnsafeBufferPointer { ptr in
+            guard let base = ptr.baseAddress else { return }
+            downEvent.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+            upEvent.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+        }
+        postEvent(downEvent, location: location, targetPid: targetPid)
+        try? await Task.sleep(nanoseconds: UInt64(dwellMs * 1_000_000))
+        postEvent(upEvent, location: location, targetPid: targetPid)
     }
 
     private static func emitDown(source: CGEventSource?, location: CGEventTapLocation, code: CGKeyCode, modifiers: CGEventFlags, targetPid: pid_t) {

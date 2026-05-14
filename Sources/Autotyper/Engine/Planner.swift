@@ -153,13 +153,13 @@ enum Planner {
         sampler: Sampler
     ) -> [KeyEvent] {
         // Source containing CJK characters is routed through a separate
-        // pinyin path: hanzi gets transliterated to ASCII pinyin syllables
-        // for the target app's IME to convert back, and the English-only
-        // layers (typo injector, mid-draft reviser, synonym dweller) are
-        // skipped because their models — QWERTY adjacency, English-letter
-        // word boundaries, English synonym dictionary — don't translate.
-        if PinyinTransliterator.containsHanzi(text) {
-            return planChineseViaPinyin(
+        // path that inserts each non-ASCII character directly via
+        // CGEventKeyboardSetUnicodeString. The English-only layers (typo
+        // injector, mid-draft reviser, synonym dweller) are skipped
+        // because their models — QWERTY adjacency, English-letter word
+        // boundaries, English synonym dictionary — don't translate.
+        if ChineseSource.containsHanzi(text) {
+            return planChineseUnicodeInsert(
                 text: text,
                 profile: profile,
                 essayMode: essayMode,
@@ -224,25 +224,35 @@ enum Planner {
         return planFromStream(stream, profile: profile, sampler: sampler)
     }
 
-    /// Pinyin path: source has CJK characters, so we transliterate to
-    /// ASCII pinyin syllables (one per hanzi, space-separated for IME
-    /// commit) and run the resulting stream through the standard
-    /// `planFromStream` timing model. SessionPacer and DurationTargeter
-    /// are language-agnostic and stay; TypoInjector / MidDraftReviser /
-    /// SynonymDweller are skipped because their English-only models
-    /// would produce nonsense on hanzi-source text. The bigram and
-    /// within-word burst logic in `planFromStream` still fires on the
-    /// expanded pinyin and produces plausible per-syllable bursts —
-    /// "ni" types fast, the trailing space sits at word-boundary speed,
-    /// the next syllable starts fresh.
-    private static func planChineseViaPinyin(
+    /// Chinese path: source has hanzi, so we walk the text and emit a
+    /// `.unicode(String)` LogicalKey for every non-ASCII character. The
+    /// Executor inserts those via `CGEventKeyboardSetUnicodeString` so
+    /// the exact source character lands in the target app — no pinyin
+    /// IME setup needed, no IME-candidate ambiguity, no racing
+    /// keystrokes against IME state. ASCII characters in mixed text
+    /// (Latin words, digits, ASCII punctuation, newlines, tabs) go
+    /// through the regular keycode path.
+    ///
+    /// SessionPacer paragraph breaks and DurationTargeter session
+    /// targeting are language-agnostic and stay on. TypoInjector,
+    /// MidDraftReviser, and SynonymDweller are skipped — their English-
+    /// only models (QWERTY adjacency, English-letter word boundaries,
+    /// English synonym dictionary) don't translate.
+    private static func planChineseUnicodeInsert(
         text: String,
         profile: ProfileParams,
         essayMode: Bool,
         sampler: Sampler
     ) -> [KeyEvent] {
-        let pinyin = PinyinTransliterator.expandToPinyinAscii(text)
-        var stream: [LogicalKey] = pinyin.map { .char($0) }
+        var stream: [LogicalKey] = []
+        stream.reserveCapacity(text.count)
+        for ch in text {
+            if ChineseSource.needsUnicodeInsertion(ch) {
+                stream.append(.unicode(String(ch)))
+            } else {
+                stream.append(.char(ch))
+            }
+        }
 
         if essayMode {
             stream = SessionPacer.inject(
@@ -376,6 +386,54 @@ enum Planner {
                 ))
                 elapsedMs += iki + dwell
                 keyIndex += 1
+
+            case .unicode(let s):
+                // Direct Unicode insertion (typically a hanzi). Use a
+                // simplified timing model: no bigram, no word complexity,
+                // no within-word burst — those are calibrated on English
+                // letter pairs and don't translate. Profile baseline IKI
+                // × warmup × fatigue × regime drift gives a reasonable
+                // per-character cadence; boundary pauses come from
+                // BigramTable which now recognizes Chinese terminators.
+                let firstChar = s.first ?? " "
+                let prevForBoundary = inBackspaceBurst ? nil : prevTyped
+                inBackspaceBurst = false
+
+                let warmup: Double = {
+                    if keyIndex >= profile.warmupKeys { return 1.0 }
+                    let frac = Double(keyIndex) / Double(profile.warmupKeys)
+                    return profile.warmupFloor + (1.0 - profile.warmupFloor) * frac
+                }()
+                let fatigue = 1.0 + profile.fatiguePerMin * (elapsedMs / 60_000.0)
+                let regimeSlowdown = regime.nextSlowdown()
+                let mu = baseIki * warmup * fatigue * regimeSlowdown
+                let typingPart = min(max(sampler.lognormal(mean: mu, sigma: profile.ikiSigma), 5), 25_000)
+                let pausePart = BigramTable.boundaryPauseMs(
+                    prev: prevForBoundary,
+                    current: firstChar,
+                    sampler: sampler
+                ) + pendingExtraMs
+                pendingExtraMs = 0
+
+                let dwell = sampler.lognormalClamped(
+                    mean: profile.dwellMeanMs,
+                    sigma: profile.dwellSigma,
+                    lower: 40,
+                    upper: 180
+                )
+
+                out.append(KeyEvent(
+                    action: .unicodeTap(string: s),
+                    delayBeforeMs: typingPart + pausePart,
+                    pauseMs: pausePart,
+                    dwellMs: dwell
+                ))
+                elapsedMs += typingPart + pausePart + dwell
+                keyIndex += 1
+                prevTyped = firstChar
+                currentWordLength = 0
+                currentWordPosition = 0
+                currentWordSlowdown = 1.0
 
             case .char(let c):
                 // After a backspace burst, treat the next char as a fresh start
@@ -595,7 +653,7 @@ enum Planner {
                 }
             case .backspace:
                 if !word.isEmpty { word.removeLast() }
-            case .extraDelayMs, .rawKey, .fastArrow:
+            case .extraDelayMs, .rawKey, .fastArrow, .unicode:
                 break
             }
             i += 1

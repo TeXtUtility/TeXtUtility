@@ -83,15 +83,18 @@ enum BigramTable {
     static func boundaryPauseMs(prev: Character?, current: Character, sampler: Sampler) -> Double {
         guard let prevChar = prev else { return 0 }
         switch prevChar {
-        case ".", "?", "!":
+        case ".", "?", "!", "。", "？", "！":
             // Bulk of mass between 0.75–2.0 s; small 8% tail to 3.0 s.
+            // Chinese sentence terminators (。 ？ ！) get the same pause
+            // distribution as their English counterparts since they play
+            // the same role in the prose rhythm.
             if sampler.bool(probability: 0.08) {
                 return sampler.uniform(in: 2000.0...3000.0)
             }
             return sampler.uniform(in: 750.0...2000.0)
-        case ",":
+        case ",", "，":
             return sampler.lognormalClamped(mean: 550, sigma: 0.4, lower: 250, upper: 1800)
-        case ";", ":":
+        case ";", ":", "；", "：":
             return sampler.lognormalClamped(mean: 750, sigma: 0.4, lower: 350, upper: 2200)
         case " ":
             // Pre-quote / pre-paren — a reframe pause before opening punctuation.

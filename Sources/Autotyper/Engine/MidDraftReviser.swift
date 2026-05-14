@@ -115,7 +115,14 @@ enum MidDraftReviser {
                 typedBuffer.append(c)
             case .backspace:
                 if !typedBuffer.isEmpty { typedBuffer.removeLast() }
-            case .extraDelayMs, .rawKey, .fastArrow:
+            case .extraDelayMs, .rawKey, .fastArrow, .unicode:
+                // Unicode insertions (hanzi) don't participate in
+                // English-letter word-boundary tracking. Skip them in
+                // the typedBuffer model so the mid-draft jump path's
+                // word-count and word-span logic stays English-only.
+                // (In practice this branch is unreachable in the
+                // Chinese path because mid-draft revision is gated off
+                // before this layer runs, but kept for safety.)
                 continue
             }
 

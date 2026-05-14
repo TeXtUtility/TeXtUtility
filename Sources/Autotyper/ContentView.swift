@@ -15,7 +15,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
-            if PinyinTransliterator.containsHanzi(state.pastedText) {
+            if ChineseSource.containsHanzi(state.pastedText) {
                 chineseModeHint
             }
             profileRow
@@ -101,20 +101,19 @@ struct ContentView: View {
         }
     }
 
-    /// Shown when the pasted source contains hanzi. Tells the user the run
-    /// will go through their active pinyin IME (so they should make sure
-    /// it's enabled in the target app) and that the English-only realism
-    /// layers are skipped on this run.
+    /// Shown when the pasted source contains hanzi. Tells the user that
+    /// the run will insert each non-ASCII character directly (no IME
+    /// needed) and that the English-only realism layers are skipped.
     private var chineseModeHint: some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "character.bubble")
                 .foregroundStyle(.blue)
                 .font(.caption)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Chinese detected — typing via pinyin")
+                Text("Chinese detected — direct character insertion")
                     .font(.caption)
                     .foregroundStyle(.primary)
-                Text("Each hanzi is sent as its pinyin + space; enable a pinyin IME in the target app. Typo injection, mid-draft revisions, and synonym dwell are skipped.")
+                Text("Each hanzi is sent verbatim via macOS Unicode events; no pinyin IME setup needed. Typo injection, mid-draft revisions, and synonym dwell are skipped on this run.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

@@ -15,10 +15,19 @@ import CoreGraphics
 /// many characters. Real users hold the arrow key for long-distance nav,
 /// producing ~30 ms inter-press intervals — much faster than `.rawKey`'s
 /// ~320 ms hand-speed.
+///
+/// `.unicode` carries a literal Unicode string (typically a single hanzi or
+/// CJK punctuation glyph) that the Executor inserts via
+/// `CGEventKeyboardSetUnicodeString` — the OS posts the string directly to
+/// the target app, bypassing the keycode-to-character mapping AND any active
+/// IME. Used by the Chinese path so the exact source character always lands
+/// in the document instead of being routed through a pinyin IME's candidate
+/// list (which would non-deterministically pick a first candidate).
 enum LogicalKey {
     case char(Character)
     case backspace
     case rawKey(code: CGKeyCode, modifiers: CGEventFlags)
     case fastArrow(code: CGKeyCode)
+    case unicode(String)
     case extraDelayMs(Double)
 }
